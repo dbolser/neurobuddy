@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>NeuroBuddy</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="clock" aria-live="off">
+    <div id="time">--:--</div>
+    <div id="bar" hidden><div id="fill"></div><div id="now"></div><div id="ticks"></div></div>
+    <div id="small"></div>
+    <div id="date"></div>
+    <div id="current"></div>
+    <div id="status"></div>
+  </main>
+
+  <div id="menu" class="sheet" hidden>
+    <button data-act="face" id="faceBtn">Clock style</button>
+    <button data-act="pick">Pick a task now</button>
+    <button data-act="checkin">Check in now</button>
+    <button data-act="clear">Clear current task</button>
+    <button data-act="refresh">Refresh from Trello</button>
+    <button data-act="close" class="quiet">Close</button>
+  </div>
+
+  <div id="overlay" hidden>
+    <div id="card">
+      <div id="q"></div>
+      <div id="title"></div>
+      <div id="sub"></div>
+      <form id="stepForm" hidden>
+        <input id="stepInput" autocomplete="off" placeholder="e.g. open the draft and write one line">
+      </form>
+      <div class="hint" id="hint"></div>
+    </div>
+    <div id="buttons"></div>
+  </div>
+
+  <div id="setup" class="sheet" hidden>
+    <h1>NeuroBuddy setup</h1>
+    <p>Open this page once with <code>#key=…&amp;token=…&amp;board=…</code> in the address.</p>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
