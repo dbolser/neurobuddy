@@ -86,3 +86,12 @@ It ends with **"Send it now with what's ready?"**
 **From:** "I'd only care about the exact minute if I had a train to catch."
 **How:** when the calendar has a trip, the whole screen changes: a countdown bar to "leave by", exact minutes shown, and a short checklist (ticket, charger, laptop). The normal task cards stop until you've left.
 **Cost:** medium. Needs the calendar job from idea 2.
+
+## 10. Planned breaks and quiet mode (Dan, 20 Nov)
+
+**From:** a friend wants NeuroBuddy as a way to focus; Dan: "a new card could suggest '20 minutes scrolling' or whatever… then NeuroBuddy would come back and ask what you'd like to work on next."
+**How:**
+- **Break cards:** now and then the deck offers a guilt-free break, e.g. "20 minutes scrolling?". Swipe right and a countdown bar runs; look at whatever you like. When it ends, NeuroBuddy asks "What next?" and starts a choosing session.
+- **Quiet while working:** a web app can't block notifications or turn on Do Not Disturb. On Samsung phones, a Modes and Routines rule does it with no code: "NeuroBuddy opened → Do Not Disturb on". Other phones: Focus mode in Digital Wellbeing, or Tasker. A small native wrapper app could switch Do Not Disturb itself, later, if it proves useful.
+**Why it fits:** breaks happen anyway; planning them means they end, and the app is there to catch the next step.
+**Cost:** small for break cards (reuses the task bar and the check-in). Quiet mode is phone setup, not code.
