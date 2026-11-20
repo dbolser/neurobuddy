@@ -13,13 +13,15 @@ test('12-hour digital, no AM/PM', () => {
 test('time in words, to the nearest quarter', () => {
   assert.equal(words(at(14, 15)), 'quarter past two');
   assert.equal(words(at(14, 17)), 'quarter past two');
-  assert.equal(words(at(14, 19)), 'just after quarter past two');
+  assert.equal(words(at(14, 19)), 'quarter past two', 'no "just after"');
+  assert.equal(words(at(11, 52)), 'quarter to twelve');
+  assert.equal(words(at(11, 53)), "nearly twelve o'clock");
   assert.equal(words(at(11, 24)), 'nearly half eleven');
   assert.equal(words(at(14, 30)), 'half two');
   assert.equal(words(at(14, 40)), 'nearly quarter to three');
   assert.equal(words(at(14, 58)), "three o'clock");
   assert.equal(words(at(11, 56)), "nearly twelve o'clock");
-  assert.equal(words(at(15, 5)), "just after three o'clock");
+  assert.equal(words(at(15, 5)), "three o'clock");
 });
 
 test('linear day bar', () => {

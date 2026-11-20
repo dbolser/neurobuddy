@@ -26,15 +26,15 @@ export function digital(d) {
 
 const NUM = ['twelve', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
 
-// To the nearest quarter, the way people say it:
-// 11:13 -> "nearly quarter past eleven"; 11:24 -> "nearly half eleven"; 11:47 -> "quarter to twelve".
+// To the nearest quarter, the way people say it, only ever looking ahead:
+// 11:13 -> "quarter past eleven"; 11:24 -> "nearly half eleven"; 11:50 -> "quarter to twelve".
 export function words(d) {
   const min = d.getMinutes() + d.getSeconds() / 60;
   let q = Math.round(min / 15) * 15;
   let h = d.getHours();
   const off = min - q;
   if (q === 60) { q = 0; h += 1; }
-  const prefix = off >= 3 ? 'just after ' : off <= -3 ? 'nearly ' : '';
+  const prefix = off <= -3 ? 'nearly ' : ''; // no 'just after': it's quarter to until it's nearly twelve
   const core = q === 0 ? NUM[h % 12] + " o'clock"
     : q === 15 ? 'quarter past ' + NUM[h % 12]
     : q === 30 ? 'half ' + NUM[h % 12]
