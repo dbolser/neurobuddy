@@ -10,19 +10,19 @@ test('12-hour digital, no AM/PM', () => {
   assert.equal(digital(at(12, 0)), '12:00');
 });
 
-test('time in words, to the nearest quarter', () => {
-  assert.equal(words(at(14, 15)), 'quarter past two');
-  assert.equal(words(at(14, 17)), 'quarter past two');
-  assert.equal(words(at(14, 19)), 'quarter past two', 'no "just after"');
-  assert.equal(words(at(11, 52)), 'quarter to twelve');
-  assert.equal(words(at(11, 53)), 'nearly twelve');
-  assert.equal(words(at(11, 24)), 'nearly half eleven');
-  assert.equal(words(at(14, 30)), 'half two');
-  assert.equal(words(at(14, 40)), 'nearly quarter to three');
-  assert.equal(words(at(14, 58)), "three o'clock");
-  assert.equal(words(at(14, 55)), 'nearly three');
-  assert.equal(words(at(11, 56)), 'nearly twelve');
-  assert.equal(words(at(15, 5)), "three o'clock");
+test('time in words: nearly before the hour and half hour, just after only after the hour', () => {
+  const say = (m) => words(at(12, m));
+  assert.equal(say(0), "twelve o'clock");
+  assert.equal(say(4), 'just after twelve');
+  assert.equal(say(12), 'quarter past twelve');
+  assert.equal(say(25), 'nearly half past twelve');
+  assert.equal(say(30), 'half past twelve');
+  assert.equal(say(38), 'half past twelve');
+  assert.equal(say(45), 'quarter to one');
+  assert.equal(say(55), 'nearly one');
+  assert.equal(say(58), "one o'clock");
+  assert.equal(words(at(23, 58)), "twelve o'clock");
+  assert.equal(words(at(0, 5)), 'just after twelve');
 });
 
 test('linear day bar', () => {

@@ -26,21 +26,27 @@ export function digital(d) {
 
 const NUM = ['twelve', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
 
-// To the nearest quarter, the way people say it, only ever looking ahead:
-// 11:13 -> "quarter past eleven"; 11:24 -> "nearly half eleven"; 11:50 -> "quarter to twelve";
-// 11:55 -> "nearly twelve"; 12:00 -> "twelve o'clock".
+// Loose on purpose. "nearly" only before the hour or the half hour (time to get ready);
+// "just after" only after the hour. Minutes past the hour -> words:
+//   57–2  twelve o'clock      3–9  just after twelve    10–22 quarter past twelve
+//   23–27 nearly half past twelve    28–39 half past twelve
+//   40–52 quarter to one      53–56 nearly one
+const PHRASES = [
+  [3, (h) => h + " o'clock"],
+  [10, (h) => 'just after ' + h],
+  [23, (h) => 'quarter past ' + h],
+  [28, (h) => 'nearly half past ' + h],
+  [40, (h) => 'half past ' + h],
+  [53, (h, n) => 'quarter to ' + n],
+  [57, (h, n) => 'nearly ' + n],
+  [60, (h, n) => n + " o'clock"],
+];
+
 export function words(d) {
   const min = d.getMinutes() + d.getSeconds() / 60;
-  let q = Math.round(min / 15) * 15;
-  let h = d.getHours();
-  const off = min - q;
-  if (q === 60) { q = 0; h += 1; }
-  const prefix = off <= -3 ? 'nearly ' : ''; // no 'just after': it's quarter to until it's nearly twelve
-  const core = q === 0 ? NUM[h % 12] + (prefix ? '' : " o'clock")
-    : q === 15 ? 'quarter past ' + NUM[h % 12]
-    : q === 30 ? 'half ' + NUM[h % 12]
-    : 'quarter to ' + NUM[(h + 1) % 12];
-  return prefix + core;
+  const h = NUM[d.getHours() % 12], n = NUM[(d.getHours() + 1) % 12];
+  for (let i = 0; i < PHRASES.length; i++) if (min < PHRASES[i][0]) return PHRASES[i][1](h, n);
+  return n + " o'clock";
 }
 
 // Linear day: span from the work-day start to end, widened to include now.
