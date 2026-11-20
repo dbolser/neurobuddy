@@ -267,7 +267,7 @@ function show(prompt, onAnswer) {
   $('sub').textContent = prompt.sub || '';
   $('stepForm').hidden = !prompt.input;
   $('overlay').classList.toggle('typing', !!prompt.input);
-  $('hint').textContent = prompt.left && prompt.right ? '← ' + prompt.left + '   ·   ' + prompt.right + ' →' : '';
+  $('hint').textContent = '';
   const box = $('buttons');
   box.innerHTML = '';
   const btns = prompt.buttons || [{ id: 'left', label: prompt.left }, { id: 'right', label: prompt.right, cls: prompt.danger ? 'danger' : 'yes' }];
@@ -349,7 +349,7 @@ function nextPrompt() {
     : s.step === 'empty' ? 'Choosing a task'
     : s.step === 'breakdown' ? 'Breaking it down'
     : (/sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task') + ' · card ' + (s.ci + 1) + ' of ' + s.order.length;
-  prompt.busy = s.step !== 'empty';
+  prompt.busy = s.step !== 'empty' && !s.quick;
   show(prompt, (choice) => {
     log({ kind: 'session', step: s.step, cardId: s.order[s.ci], choice: choice });
     if (choice === 'busy') { // already busy with something: no more cards for a while

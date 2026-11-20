@@ -74,10 +74,11 @@ body[data-task] #clock { padding-bottom: 16vh; }
 #mode { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
 #mode:empty { display: none; }
 #q { font-size: 20px; color: var(--dim); margin-bottom: 16px; }
-#title { font-size: 34px; font-weight: 600; line-height: 1.2; }
+#title { font-size: 34px; font-weight: 600; line-height: 1.2;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 #sub { font-size: 18px; color: var(--dim); margin-top: 16px; }
 #card.danger #q { color: var(--danger); }
-.hint { font-size: 14px; color: #555; margin-top: 28px; }
+.hint { display: none; }
 #stepInput { width: 100%; margin-top: 20px; font-size: 20px; padding: 14px; border-radius: 12px;
   border: 1px solid #444; background: #000; color: var(--fg); user-select: text; }
 #buttons { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 22px;
