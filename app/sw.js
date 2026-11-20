@@ -1,6 +1,6 @@
 // Network first for the app's own files, cache as fallback, so the app still
 // starts when the dev server (or the internet) is unreachable. Trello calls pass through.
-const CACHE = 'nb-v9';
+const CACHE = 'nb-v10';
 const SHELL = ['./', 'index.html', 'app.js', 'flow.js', 'clock.js', 'style.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -16,7 +16,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  e.respondWith(fetch(e.request).then((res) => {
+  // no-cache: always ask the server (GitHub Pages sets a 10-min cache), so a deploy shows up on reload.
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
     const copy = res.clone();
     caches.open(CACHE).then((c) => c.put(e.request, copy));
     return res;
