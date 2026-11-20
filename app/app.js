@@ -230,7 +230,8 @@ function renderFace(now) {
   const big = p.words ? 'words' : 'digits';
   document.body.setAttribute('data-big', big);
   if (p.bar) document.body.setAttribute('data-bar', ''); else document.body.removeAttribute('data-bar');
-  smoothText($('time'), big === 'words' ? words(now) : digital(now));
+  // While Claude tests over DevTools the clock text is left alone (demos drive it).
+  if (!document.body.classList.contains('testing')) smoothText($('time'), big === 'words' ? words(now) : digital(now));
   $('small').textContent = p.words && p.digits ? digital(now) : '';
   $('time').hidden = !p.words && !p.digits;
   $('bar').hidden = !p.bar;

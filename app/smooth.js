@@ -94,8 +94,9 @@ export function smoothText(el, text) {
   const old = el.getAttribute('data-text');
   if (old === text) return;
   el.setAttribute('data-text', text);
-  clearTimeout(timers.get(el));
-  if (old === null || document.hidden) { build(el, seq(text, 'keep')); return; }
+  if (old === null || document.hidden) { clearTimeout(timers.get(el)); timers.delete(el); build(el, seq(text, 'keep')); return; }
+  // Still animating the last change: settle it first so the letters line up.
+  if (timers.has(el)) { clearTimeout(timers.get(el)); timers.delete(el); build(el, seq(old, 'keep')); }
 
   const oldSpans = el.querySelectorAll('.c');
   const widths = [];
@@ -122,7 +123,7 @@ export function smoothText(el, text) {
     go(s.el, 0, s.w + 'px', '0');
     setTimeout(() => go(s.el, 0, '0px', '0'), steps * STAGGER_MS + WIDTH_MS * 0.4);
   });
-  timers.set(el, setTimeout(() => build(el, seq(text, 'keep')), steps * STAGGER_MS + WIDTH_MS * 1.4 + 100));
+  timers.set(el, setTimeout(() => { timers.delete(el); build(el, seq(text, 'keep')); }, steps * STAGGER_MS + WIDTH_MS * 1.4 + 100));
 }
 
 function go(e, delay, width, opacity) {
