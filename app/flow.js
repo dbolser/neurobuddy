@@ -56,10 +56,22 @@ export function startOfDay(d) {
   return x;
 }
 
+// Next weekday (Friday -> Monday).
+export function nextWorkday(now) {
+  const d = startOfDay(now);
+  do d.setDate(d.getDate() + 1); while (d.getDay() === 0 || d.getDay() === 6);
+  return d;
+}
+
+export function nextWorkdayName(now) {
+  const d = nextWorkday(now);
+  return +d === +startOfDay(+startOfDay(now) + DAY + 3e6) ? 'Tomorrow' : d.toLocaleDateString('en-GB', { weekday: 'long' });
+}
+
 // Deadline choices offered when a card without one gets put off. 17:00 local.
 export function deadlineFor(choice, now) {
   const d = startOfDay(now);
-  if (choice === 'tomorrow') d.setDate(d.getDate() + 1);
+  if (choice === 'tomorrow') d.setTime(+nextWorkday(now));
   else if (choice === 'friday') d.setDate(d.getDate() + (((5 - d.getDay() + 7) % 7) || 7));
   else if (choice === 'nextweek') d.setDate(d.getDate() + 7);
   else return null;
@@ -123,9 +135,9 @@ export function promptFor(s, byId, now) {
   // button only, so a stray swipe can never do it.
   if (s.step === 'delay') {
     const miss = missesDeadline(card, now);
-    return { q: 'Not now. When, then?', title: card.name, sub: dueText(card, now), danger: miss,
+    return { q: 'Not now. When, then?', title: card.name, sub: dueText(card, now),
       buttons: [{ id: 'keep', label: 'Keep it now', cls: 'yes' }, { id: 'later', label: 'Later today' },
-        miss ? { id: 'miss', label: 'Tomorrow (misses the deadline)', cls: 'danger' } : { id: 'tomorrow', label: 'Tomorrow' }] };
+        miss ? { id: 'move', label: 'New deadline' } : { id: 'tomorrow', label: nextWorkdayName(now) }] };
   }
   if (s.step === 'ugly') {
     return { q: 'You keep skipping this. Too many steps?', title: card.name,
@@ -142,8 +154,9 @@ export function promptFor(s, byId, now) {
       left: 'Not now', right: 'Do it' };
   }
   if (s.step === 'setdue') {
-    return { q: 'Give it a deadline?', title: card.name,
-      buttons: [{ id: 'tomorrow', label: 'Tomorrow' }, { id: 'friday', label: 'Friday' },
+    return { q: card.due ? 'New deadline?' : 'Give it a deadline?', title: card.name,
+      sub: card.due ? 'Was ' + dueText(card, now) : '',
+      buttons: [{ id: 'tomorrow', label: nextWorkdayName(now) }, { id: 'friday', label: 'Friday' },
         { id: 'nextweek', label: 'Next week' }, { id: 'none', label: 'No deadline' }] };
   }
   if (s.step === 'breakdown') {
@@ -214,11 +227,11 @@ export function answer(s, byId, choice, now) {
       fx.push({ type: 'comment', cardId: card.id, text: 'Put off until later today' });
       return { next: nextCard(s), effects: fx };
     }
-    if (choice === 'tomorrow' || choice === 'miss') {
+    if (choice === 'tomorrow' || choice === 'move') {
       fx.push({ type: 'snooze', cardId: card.id, until: +startOfDay(+now + DAY) });
-      fx.push({ type: 'comment', cardId: card.id,
-        text: choice === 'miss' ? 'Chose to miss the deadline (' + dueText(card, now) + ')' : 'Put off until tomorrow' });
-      return { next: card.due ? nextCard(s) : with_(s, { step: 'setdue' }), effects: fx };
+      if (choice === 'tomorrow') fx.push({ type: 'comment', cardId: card.id, text: 'Put off until ' + nextWorkdayName(now) });
+      // Moving the deadline (or a card without one) asks for the new date.
+      return { next: card.due && choice === 'tomorrow' ? nextCard(s) : with_(s, { step: 'setdue' }), effects: fx };
     }
     return { next: with_(s, { step: 'breakdown' }), effects: fx };
   }
@@ -226,6 +239,8 @@ export function answer(s, byId, choice, now) {
   if (s.step === 'setdue') {
     const due = deadlineFor(choice, now);
     if (due) fx.push({ type: 'setDue', cardId: card.id, due: due.toISOString() });
+    if (card.due) fx.push({ type: 'comment', cardId: card.id,
+      text: 'Moved the deadline from ' + dueText(card, now) + ' to ' + (due ? dueText({ due: due }, now) : 'none') });
     return { next: nextCard(s), effects: fx };
   }
 

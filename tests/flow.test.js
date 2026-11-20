@@ -32,10 +32,10 @@ test('swiping no walks the hurdles, then asks about the deadline', () => {
   s = answer(s, byId, 'left', now).next;
   const p = promptFor(s, byId, now);
   assert.equal(s.step, 'delay');
-  assert.ok(p.danger, 'urgent card asks about missing the deadline');
+  assert.ok(p.buttons.some((b) => b.id === 'move'), 'due 10am tomorrow: offers a new deadline');
 });
 
-test('refusing to miss the deadline leads to break-down, then brain-day, then back', () => {
+test('keeping it leads to break-down, then brain-day, then back', () => {
   let s = { order: ['p'], ci: 0, hi: 0, step: 'delay' };
   assert.ok(!promptFor(s, byId, now).right, 'putting off is never a swipe');
   s = answer(s, byId, 'keep', now).next;
@@ -75,6 +75,7 @@ test('swiping right never puts anything off', () => {
 
 test('deadline choices', () => {
   assert.equal(deadlineFor('tomorrow', now).getDate(), 20);
+  assert.equal(deadlineFor('tomorrow', new Date('2026-11-20T10:00:00')).getDate(), 23, 'Friday -> Monday');
   assert.equal(deadlineFor('friday', new Date('2026-11-20T10:00:00')).getDate(), 27);
   assert.equal(deadlineFor('none', now), null);
 });
@@ -83,7 +84,14 @@ test('not now on a card due later today offers later today, and only warns when 
   const noon = { id: 'n', name: 'Alex list', due: '2026-11-19T12:00:00', checklists: [] };
   const map = { n: noon };
   const p = promptFor({ order: ['n'], ci: 0, hi: 0, step: 'delay', skips: {} }, map, now);
-  assert.deepEqual(p.buttons.map((b) => b.id), ['keep', 'later', 'miss']);
+  assert.deepEqual(p.buttons.map((b) => b.id), ['keep', 'later', 'move']);
+  assert.ok(!p.danger, 'no harsh red card');
+  const mv = answer({ order: ['n'], ci: 0, hi: 0, step: 'delay', skips: {} }, map, 'move', now);
+  assert.equal(mv.next.step, 'setdue');
+  assert.equal(promptFor(mv.next, map, now).q, 'New deadline?');
+  const set = answer(mv.next, map, 'friday', now);
+  assert.equal(set.effects[0].type, 'setDue');
+  assert.ok(/Moved the deadline/.test(set.effects[1].text));
   const r = answer({ order: ['n'], ci: 0, hi: 0, step: 'delay', skips: {} }, map, 'later', now);
   assert.equal(r.effects[0].until, +now + 90 * 60e3);
   assert.ok(!missesDeadline(yanis, now), 'due in 2.5 days: tomorrow is fine');
