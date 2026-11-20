@@ -80,3 +80,9 @@ It ends with **"Send it now with what's ready?"**
 3. Then the **calendar runway (2)**, because calendar access already exists on outsee2.
 
 **Capture (6)** costs nothing, so do it this week whatever you choose.
+
+## 9. Travel mode (Dan, 20 Nov)
+
+**From:** "I'd only care about the exact minute if I had a train to catch."
+**How:** when the calendar has a trip, the whole screen changes: a countdown bar to "leave by", exact minutes shown, and a short checklist (ticket, charger, laptop). The normal task cards stop until you've left.
+**Cost:** medium. Needs the calendar job from idea 2.
