@@ -8,6 +8,7 @@ const API = 'https://api.trello.com/1';
 const MIN = 60e3;
 const BUSY = 45; // minutes of quiet after "I'm busy" (on top of the usual offer gap)
 const DEFAULTS = { checkin: 20, offer: 15, start: 9, end: 18, poll: 2, face: 'bar+words' }; // minutes / hours
+const CHECKIN_SHOWN = 5; // minutes a card the app put up by itself stays, if ignored
 const $ = (id) => document.getElementById(id);
 
 // ---------- storage (survives private-mode failures) ----------
@@ -354,11 +355,13 @@ function attachSwipe(el, canStart, onSwipe, area) {
 attachSwipe($('card'), () => !!(shown && shown.prompt.left), choose);
 
 // ---------- sessions & check-ins ----------
-function pickTask(firstId, step) {
+// auto: offered by the app itself (not asked for), so its cards go away if ignored.
+function pickTask(firstId, step, auto) {
   const now = new Date();
   st.lastOffer = Date.now();
   st.session = startSession(orderCards(st.cards, priorityLists(), now, st.snoozed), firstId, step, st.skips);
   st.session.snoozed = st.snoozed;
+  st.session.auto = !!auto;
   persist();
   nextPrompt();
 }
@@ -373,6 +376,10 @@ function nextPrompt() {
     : s.step === 'breakdown' ? 'Breaking it down'
     : (/sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task') + ' · card ' + (s.ci + 1) + ' of ' + s.order.length;
   prompt.busy = s.step !== 'empty' && !s.quick;
+  if (s.auto) { // nobody asked: back to the clock if it's ignored
+    prompt.timeout = CHECKIN_SHOWN * MIN;
+    prompt.onTimeout = () => { st.session = null; log({ kind: 'session', step: s.step, choice: 'ignored' }); };
+  }
   show(prompt, (choice) => {
     log({ kind: 'session', step: s.step, cardId: s.order[s.ci], choice: choice });
     if (choice === 'busy') { // already busy with something: no more cards for a while
@@ -416,7 +423,6 @@ $('stepForm').addEventListener('submit', (e) => {
   $('sub').textContent = typed.map((x, i) => (i + 1) + '. ' + x).join('   ');
 });
 
-const CHECKIN_SHOWN = 5; // minutes an unanswered check-in stays up
 
 function checkin(byTap) {
   const c = st.current;
@@ -466,11 +472,13 @@ function workHours(d) {
 
 function tick() {
   renderClock();
-  if (shown || !$('menu').hidden || !cfg.token) return;
   const now = new Date();
+  // Work's over: cards the app put up by itself go away.
+  if (!workHours(now) && shown && shown.prompt.timeout) { hide(); st.session = null; }
+  if (shown || !$('menu').hidden || !cfg.token) return;
   if (!workHours(now)) return;
   if (st.current && Date.now() - st.lastCheck >= cfg.checkin * MIN) checkin();
-  else if (!st.current && Date.now() - st.lastOffer >= cfg.offer * MIN) pickTask();
+  else if (!st.current && Date.now() - st.lastOffer >= cfg.offer * MIN) pickTask(undefined, undefined, true);
 }
 
 // ---------- attention: beep + buzz when a card appears ----------
