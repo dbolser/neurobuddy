@@ -303,13 +303,15 @@ function choose(id) {
 
 // Swipe: drag past ~1/4 screen width to answer. Used on cards and the task strip.
 let swiped = 0; // time of the last swipe, so its pointerup doesn't also count as a tap
-function attachSwipe(el, canStart, onSwipe) {
+// `area` takes the touches; `el` is what moves (they differ for the task strip).
+function attachSwipe(el, canStart, onSwipe, area) {
+  area = area || el;
   let x0 = null, dx = 0;
-  el.addEventListener('pointerdown', (e) => {
+  area.addEventListener('pointerdown', (e) => {
     if (!canStart() || e.target.tagName === 'INPUT') return;
-    x0 = e.clientX; dx = 0; el.classList.remove('snap'); el.setPointerCapture(e.pointerId);
+    x0 = e.clientX; dx = 0; el.classList.remove('snap'); area.setPointerCapture(e.pointerId);
   });
-  el.addEventListener('pointermove', (e) => {
+  area.addEventListener('pointermove', (e) => {
     if (x0 === null) return;
     dx = e.clientX - x0;
     el.style.transform = 'translateX(' + dx + 'px) rotate(' + dx / 25 + 'deg)';
@@ -327,8 +329,8 @@ function attachSwipe(el, canStart, onSwipe) {
       setTimeout(() => { onSwipe(dx > 0 ? 'right' : 'left'); el.style.transform = ''; }, 180);
     } else el.style.transform = '';
   };
-  el.addEventListener('pointerup', end);
-  el.addEventListener('pointercancel', end);
+  area.addEventListener('pointerup', end);
+  area.addEventListener('pointercancel', end);
 }
 attachSwipe($('card'), () => !!(shown && shown.prompt.left), choose);
 
@@ -460,12 +462,13 @@ function keepAwake() {
 document.addEventListener('visibilitychange', () => { keepAwake(); if (document.visibilityState === 'visible') refresh(); });
 
 // ---------- the task strip: swipe right = done, left = something else, tap = check in ----------
-attachSwipe($('task'), () => !shown && !!st.current, (dir) => {
+// Swipe anywhere on the clock screen; the task strip is what moves.
+attachSwipe($('task'), () => !shown && !!st.current && $('menu').hidden && $('setup').hidden, (dir) => {
   const c = st.current;
   log({ kind: 'strip', cardId: c.cardId, itemId: c.itemId, choice: dir });
   if (dir === 'right') completeCurrent().then(() => pickTask(c.cardId));
   else switchAway();
-});
+}, document.body);
 $('task').addEventListener('click', () => { if (!shown && Date.now() - swiped > 400) checkin(true); });
 
 function switchAway() {
@@ -475,7 +478,7 @@ function switchAway() {
 }
 
 // ---------- menu (tap the clock) ----------
-$('clock').addEventListener('click', () => { if (cfg.token) $('menu').hidden = false; });
+$('clock').addEventListener('click', () => { if (cfg.token && Date.now() - swiped > 400) $('menu').hidden = false; });
 $('menu').addEventListener('click', (e) => {
   const act = e.target.getAttribute('data-act');
   if (!act) return;
