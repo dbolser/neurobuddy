@@ -265,6 +265,10 @@ let expiry = null;
 function show(prompt, onAnswer) {
   shown = { prompt: prompt, onAnswer: onAnswer };
   clearTimeout(expiry);
+  const fill = $('expiryFill');
+  $('expiry').hidden = !prompt.timeout;
+  fill.style.transition = 'none';
+  fill.style.width = '100%';
   if (prompt.timeout) {
     const mine = shown;
     expiry = setTimeout(() => { if (shown === mine) { hide(); prompt.onTimeout && prompt.onTimeout(); } }, prompt.timeout);
@@ -298,6 +302,11 @@ function show(prompt, onAnswer) {
   }
   $('overlay').hidden = false;
   $('menu').hidden = true;
+  if (prompt.timeout) { // start full (now it's visible), then drain
+    void fill.offsetWidth;
+    fill.style.transition = 'width ' + prompt.timeout + 'ms linear';
+    fill.style.width = '0%';
+  }
   if (prompt.input) setTimeout(() => $('stepInput').focus(), 50);
   else alertUser();
 }

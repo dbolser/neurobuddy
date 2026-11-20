@@ -25,6 +25,8 @@ button { font: inherit; }
 /* Slim progress bar, used for the task timer and the clock above cards */
 .mini { position: relative; height: 10px; background: #1c1b1a; border-radius: 5px; overflow: hidden; }
 .mini > div { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 5px; }
+/* Drains while an unanswered card waits to go away by itself */
+#expiry { height: 4px; margin-top: 14px; opacity: 0.6; }
 
 /* Current task, pinned to the bottom of the clock */
 #task { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 6vw 14px; text-align: center; }
