@@ -10,10 +10,10 @@ test('12-hour digital, no AM/PM', () => {
   assert.equal(digital(at(12, 0)), '12:00');
 });
 
-test('time in words: nearly before the hour and half hour, just after only after the hour', () => {
+test('time in words: nearly before the hour and half hour, just gone only after the hour', () => {
   const say = (m) => words(at(12, m));
   assert.equal(say(0), "twelve o'clock");
-  assert.equal(say(4), 'just after twelve');
+  assert.equal(say(4), 'just gone twelve');
   assert.equal(say(12), 'quarter past twelve');
   assert.equal(say(25), 'nearly half past twelve');
   assert.equal(say(30), 'half past twelve');
@@ -22,7 +22,7 @@ test('time in words: nearly before the hour and half hour, just after only after
   assert.equal(say(55), 'nearly one');
   assert.equal(say(58), "one o'clock");
   assert.equal(words(at(23, 58)), "twelve o'clock");
-  assert.equal(words(at(0, 5)), 'just after twelve');
+  assert.equal(words(at(0, 5)), 'just gone twelve');
 });
 
 test('linear day bar', () => {

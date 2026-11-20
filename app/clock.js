@@ -27,13 +27,13 @@ export function digital(d) {
 const NUM = ['twelve', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
 
 // Loose on purpose. "nearly" only before the hour or the half hour (time to get ready);
-// "just after" only after the hour. Minutes past the hour -> words:
-//   57–2  twelve o'clock      3–9  just after twelve    10–22 quarter past twelve
+// "just gone" only after the hour. Minutes past the hour -> words:
+//   57–2  twelve o'clock      3–9  just gone twelve    10–22 quarter past twelve
 //   23–27 nearly half past twelve    28–39 half past twelve
 //   40–52 quarter to one      53–56 nearly one
 const PHRASES = [
   [3, (h) => h + " o'clock"],
-  [10, (h) => 'just after ' + h],
+  [10, (h) => 'just gone ' + h],
   [23, (h) => 'quarter past ' + h],
   [28, (h) => 'nearly half past ' + h],
   [40, (h) => 'half past ' + h],

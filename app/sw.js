@@ -1,6 +1,6 @@
 // Network first for the app's own files, cache as fallback, so the app still
 // starts when the dev server (or the internet) is unreachable. Trello calls pass through.
-const CACHE = 'nb-v16';
+const CACHE = 'nb-v17';
 const SHELL = ['./', 'index.html', 'app.js', 'flow.js', 'clock.js', 'smooth.js', 'style.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {

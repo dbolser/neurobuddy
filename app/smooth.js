@@ -1,7 +1,7 @@
 // Smoothly change one line of text into another, letter by letter.
 // Shared words stay (and glide as the line re-centres); gone letters close up
 // from both ends; new letters open and fade in left to right, at the same time.
-// "half eleven" -> "just after half eleven": the j appears, then u, s, t…
+// "half eleven" -> "just gone half eleven": the j appears, then u, s, t…
 // Pure-ish: only touches `el`. Chrome 87: no Array.at, no replaceChildren.
 
 const WIDTH_MS = 380;  // each letter opening or closing
