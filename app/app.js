@@ -1,7 +1,7 @@
 // NeuroBuddy: desk clock that pops up swipeable task cards from a Trello board.
 // Chrome 87 target (Galaxy A20e): no top-level await, no Array.at.
 import { FACES, faceParts, faceName, digital, words, dayBar } from './clock.js';
-import { orderCards, startSession, promptFor, answer, startOfDay, DAY, LATER } from './flow.js';
+import { orderCards, startSession, promptFor, answer, startOfDay, DAY, LATER, splitSteps } from './flow.js';
 
 const API = 'https://api.trello.com/1';
 const MIN = 60e3;
@@ -119,7 +119,7 @@ function run(effects) {
     } else if (e.type === 'setDue') {
       writes.push(trello('PUT', '/cards/' + e.cardId, { due: e.due }));
     } else if (e.type === 'askStep') {
-      askStep(e.cardId, e.cardName);
+      askSteps(e.cardId, e.cardName, true);
     } else if (e.type === 'idle') {
       st.lastOffer = Date.now();
     }
@@ -156,17 +156,26 @@ function completeCurrent() {
     .then(refresh, (e) => { st.error = 'write failed'; console.warn(e); });
 }
 
-// Add a new first step to the card and start it straight away.
-function addStep(cardId, cardName, text) {
+// Add steps (in order) to the top of the card's main checklist, then start the
+// first one if asked to (or if you were on the whole card, not a step of it).
+function addSteps(cardId, cardName, texts, startFirst) {
   const card = byId()[cardId];
-  const cl = card && card.checklists && card.checklists[0];
-  const list = cl ? Promise.resolve(cl) : trello('POST', '/cards/' + cardId + '/checklists', { name: 'Steps' });
-  return list
-    .then((l) => trello('POST', '/checklists/' + l.id + '/checkItems', { name: text, pos: 'top' }))
-    .then((item) => {
-      run([{ type: 'start', cardId: cardId, itemId: item.id, name: text, cardName: cardName },
-        { type: 'comment', cardId: cardId, text: 'Broke it down; started: ' + text }]);
-    });
+  const cl = card && (card.checklists || []).filter((l) => !/^later/i.test(l.name || ''))[0];
+  let chain = cl ? Promise.resolve(cl) : trello('POST', '/cards/' + cardId + '/checklists', { name: 'Steps' });
+  const items = [];
+  // Last first, each to the top, so they end up in the order typed.
+  texts.slice().reverse().forEach((t) => {
+    chain = chain.then((l) => trello('POST', '/checklists/' + l.id + '/checkItems', { name: t, pos: 'top' })
+      .then((item) => { items.unshift(item); return l; }));
+  });
+  return chain.then(() => {
+    const fx = [{ type: 'comment', cardId: cardId, text: 'Added steps: ' + texts.join('; ') }];
+    const c = st.current;
+    if (startFirst || (c && c.cardId === cardId && !c.itemId)) {
+      fx.push({ type: 'start', cardId: cardId, itemId: items[0].id, name: texts[0], cardName: cardName });
+    }
+    run(fx);
+  });
 }
 
 // ---------- clock ----------
@@ -253,6 +262,7 @@ function show(prompt, onAnswer) {
   $('title').textContent = prompt.title;
   $('sub').textContent = prompt.sub || '';
   $('stepForm').hidden = !prompt.input;
+  $('overlay').classList.toggle('typing', !!prompt.input);
   $('hint').textContent = prompt.left && prompt.right ? '← ' + prompt.left + '   ·   ' + prompt.right + ' →' : '';
   const box = $('buttons');
   box.innerHTML = '';
@@ -330,6 +340,7 @@ function nextPrompt() {
   const map = byId();
   const prompt = promptFor(s, map, new Date());
   prompt.mode = s.step === 'empty' ? 'Choosing a task'
+    : s.step === 'breakdown' ? 'Breaking it down'
     : (/sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task') + ' · card ' + (s.ci + 1) + ' of ' + s.order.length;
   prompt.busy = s.step !== 'empty';
   show(prompt, (choice) => {
@@ -347,17 +358,33 @@ function nextPrompt() {
   });
 }
 
-function askStep(cardId, cardName) {
-  show({ mode: 'Breaking it down', q: 'Smallest next step?', title: cardName, input: true,
-    buttons: [{ id: 'cancel', label: 'Never mind' }, { id: 'add', label: 'Start it', cls: 'yes' }] }, (choice) => {
-    const text = $('stepInput').value.trim();
+// Type steps one at a time: "Go" on the keyboard adds each; Save writes them all.
+let typed = null; // steps typed so far on the open card
+function askSteps(cardId, cardName, startFirst) {
+  typed = [];
+  const prompt = { mode: startFirst ? 'Breaking it down' : 'Adding steps', title: cardName, input: true,
+    q: startFirst ? 'Smallest next step? Then any more.' : 'Brain dump: one step at a time, "Go" after each.',
+    buttons: [{ id: 'cancel', label: 'Never mind' }, { id: 'save', label: startFirst ? 'Save and start the first' : 'Save steps', cls: 'yes' }] };
+  show(prompt, (choice) => {
+    const last = $('stepInput').value.trim();
     $('stepInput').value = '';
-    log({ kind: 'breakdown', cardId: cardId, choice: choice, text: text });
-    if (choice === 'add' && text) addStep(cardId, cardName, text).catch((e) => { st.error = 'write failed'; console.warn(e); });
+    if (last) typed.push(last);
+    const texts = [].concat.apply([], typed.map(splitSteps));
+    typed = null;
+    log({ kind: 'steps', cardId: cardId, choice: choice, texts: texts });
+    if (choice === 'save' && texts.length) addSteps(cardId, cardName, texts, startFirst).catch((e) => { st.error = 'write failed'; console.warn(e); renderClock(); });
     else st.lastOffer = Date.now();
   });
 }
-$('stepForm').addEventListener('submit', (e) => { e.preventDefault(); choose('add'); });
+$('stepForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const t = $('stepInput').value.trim();
+  if (!t || !typed) return;
+  typed.push(t);
+  $('stepInput').value = '';
+  typed = [].concat.apply([], typed.map(splitSteps));
+  $('sub').textContent = typed.map((x, i) => (i + 1) + '. ' + x).join('   ');
+});
 
 function checkin(byTap) {
   const c = st.current;
@@ -367,9 +394,10 @@ function checkin(byTap) {
   const mins = Math.round((Date.now() - c.since) / MIN);
   show({ mode: byTap ? 'Your task' : 'Check-in', q: 'Still on this? (' + mins + ' min)', title: c.name, sub: c.cardName !== c.name ? c.cardName : '',
     buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
-      { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }] }, (choice) => {
+      { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }] }, (choice) => {
     log({ kind: 'checkin', cardId: c.cardId, itemId: c.itemId, choice: choice, mins: mins });
     if (choice === 'done') completeCurrent().then(() => pickTask());
+    else if (choice === 'steps') askSteps(c.cardId, c.cardName || c.name, false);
     else if (choice === 'switch') {
       run([{ type: 'comment', cardId: c.cardId, text: 'Switched away after ' + mins + ' min from: ' + c.name }]);
       st.current = null;

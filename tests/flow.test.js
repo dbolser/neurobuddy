@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, LATER, DAY } from '../app/flow.js';
+import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, splitSteps, LATER, DAY } from '../app/flow.js';
 
 const now = new Date('2026-11-19T10:00:00');
 const L = { today: 'T', week: 'W', later: 'L', done: 'D' };
@@ -126,4 +126,11 @@ test('send it ugly waits for repeated skips', () => {
   let s = startSession([big], null, null, { b: 1 });
   for (let i = 0; i < 4; i++) s = answer(s, bigMap, 'left', now).next;
   assert.equal(s.step, 'delay');
+});
+
+test('numbered brain dumps split into steps', () => {
+  assert.deepEqual(splitSteps('1) Find the thread. 2) Try the /recall skill on it 3) write up'),
+    ['Find the thread.', 'Try the /recall skill on it', 'write up']);
+  assert.deepEqual(splitSteps('email Julian; check figures'), ['email Julian', 'check figures']);
+  assert.deepEqual(splitSteps('Run v2 of the model'), ['Run v2 of the model']);
 });

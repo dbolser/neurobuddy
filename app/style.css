@@ -120,3 +120,14 @@ body[data-task] #clock { padding-bottom: 22vh; }
   #small { font-size: min(3.2vw, 6.5vh); }
   body[data-big="words"] #time { font-size: min(8vw, 16vh); }
 }
+
+/* Typing: the keyboard leaves little room, so drop everything but the essentials */
+#overlay.typing { justify-content: flex-start; overflow-y: auto; padding-top: 8px; }
+#overlay.typing #ovClock, #overlay.typing .hint, #overlay.typing #mode { display: none; }
+#overlay.typing #card { min-height: 0; padding: 12px 18px; }
+#overlay.typing #q { font-size: 15px; margin-bottom: 4px; }
+#overlay.typing #title { font-size: 20px; }
+#overlay.typing #sub { font-size: 15px; margin-top: 4px; color: var(--accent); }
+#overlay.typing #stepInput { margin-top: 8px; padding: 10px; font-size: 18px; }
+#overlay.typing #buttons { margin-top: 8px; flex-wrap: nowrap; }
+#overlay.typing #buttons button { padding: 10px 8px; font-size: 16px; }

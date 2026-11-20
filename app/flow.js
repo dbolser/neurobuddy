@@ -4,6 +4,11 @@
 
 export const DAY = 864e5;
 
+// "1) find the thread 2) try /recall; 3. write it up" -> three steps.
+export function splitSteps(text) {
+  return text.split(/(?:^|\s+)\d+[).:]\s*|\s*[;\n]\s*/).map((t) => t.trim()).filter(Boolean);
+}
+
 // Checklists named "Later…" hold steps sorted out as not needed yet ("send it ugly").
 export const LATER = 'Later (after it ships)';
 const isLater = (cl) => /^later/i.test(cl.name || '');
