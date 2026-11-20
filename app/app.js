@@ -1,10 +1,11 @@
 // NeuroBuddy: desk clock that pops up swipeable task cards from a Trello board.
 // Chrome 87 target (Galaxy A20e): no top-level await, no Array.at.
 import { FACES, faceParts, faceName, digital, words, dayBar } from './clock.js';
-import { orderCards, startSession, promptFor, answer, startOfDay, DAY } from './flow.js';
+import { orderCards, startSession, promptFor, answer, startOfDay, DAY, LATER } from './flow.js';
 
 const API = 'https://api.trello.com/1';
 const MIN = 60e3;
+const BUSY = 45; // minutes of quiet after "I'm busy" (on top of the usual offer gap)
 const DEFAULTS = { checkin: 20, offer: 15, start: 9, end: 18, poll: 2, face: 'bar+words' }; // minutes / hours
 const $ = (id) => document.getElementById(id);
 
@@ -25,6 +26,7 @@ const st = {
   cards: load('cards', []),
   current: load('current', null),  // { cardId, itemId, name, cardName, since }
   snoozed: load('snoozed', {}),    // cardId -> ms
+  skips: load('skips', {}),        // cardId -> times every step was turned down
   lastCheck: load('lastCheck', 0),
   lastOffer: load('lastOffer', 0),
   session: null,
@@ -34,13 +36,13 @@ const st = {
 
 function persist() {
   save('lists', st.lists); save('cards', st.cards); save('current', st.current);
-  save('snoozed', st.snoozed); save('lastCheck', st.lastCheck); save('lastOffer', st.lastOffer);
+  save('snoozed', st.snoozed); save('skips', st.skips); save('lastCheck', st.lastCheck); save('lastOffer', st.lastOffer);
 }
 
 // Another window of the app changed state: take it, rather than overwrite it later.
 window.addEventListener('storage', (e) => {
   if (!e.key || e.key.indexOf('nb.') !== 0) return;
-  ['current', 'snoozed', 'lastCheck', 'lastOffer'].forEach((k) => { st[k] = load(k, st[k]); });
+  ['current', 'snoozed', 'skips', 'lastCheck', 'lastOffer'].forEach((k) => { st[k] = load(k, st[k]); });
   renderClock();
 });
 
@@ -64,7 +66,7 @@ function refresh() {
     trello('GET', '/boards/' + cfg.board + '/lists', { fields: 'name' }),
     trello('GET', '/boards/' + cfg.board + '/cards', {
       fields: 'name,idList,due,dueComplete,pos', checklists: 'all',
-      checklist_fields: 'pos', checkItem_fields: 'name,state,pos' }),
+      checklist_fields: 'name,pos', checkItem_fields: 'name,state,pos' }),
   ]).then((r) => {
     const byName = {};
     r[0].forEach((l) => { byName[l.name.trim().toLowerCase()] = l.id; });
@@ -106,7 +108,14 @@ function run(effects) {
     } else if (e.type === 'comment') {
       writes.push(trello('POST', '/cards/' + e.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: ' + e.text }));
     } else if (e.type === 'snooze') {
-      st.snoozed[e.cardId] = +startOfDay(Date.now() + DAY);
+      st.snoozed[e.cardId] = e.until || +startOfDay(Date.now() + DAY);
+    } else if (e.type === 'skipped') {
+      st.skips[e.cardId] = (st.skips[e.cardId] || 0) + 1;
+    } else if (e.type === 'sorted') {
+      st.skips[e.cardId] = 0;
+    } else if (e.type === 'later') {
+      writes.push(moveToLater(e.cardId, e.itemId).then(() =>
+        trello('POST', '/cards/' + e.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: Can follow later: ' + e.name })));
     } else if (e.type === 'setDue') {
       writes.push(trello('PUT', '/cards/' + e.cardId, { due: e.due }));
     } else if (e.type === 'askStep') {
@@ -118,6 +127,21 @@ function run(effects) {
   persist();
   renderClock();
   if (writes.length) Promise.all(writes).then(refresh, (err) => { st.error = 'write failed'; console.warn(err); renderClock(); });
+}
+
+// Move a step into the card's "Later" checklist, creating it once (calls are chained per card).
+const laterList = {};
+function moveToLater(cardId, itemId) {
+  if (!laterList[cardId]) {
+    const card = byId()[cardId];
+    const have = card && (card.checklists || []).filter((cl) => /^later/i.test(cl.name || ''))[0];
+    laterList[cardId] = have ? Promise.resolve(have)
+      : trello('POST', '/cards/' + cardId + '/checklists', { name: LATER, pos: 'bottom' });
+    laterList[cardId].catch(() => { delete laterList[cardId]; });
+  }
+  laterList[cardId] = laterList[cardId].then((cl) =>
+    trello('PUT', '/cards/' + cardId + '/checkItem/' + itemId, { idChecklist: cl.id }).then(() => cl));
+  return laterList[cardId];
 }
 
 function completeCurrent() {
@@ -240,6 +264,13 @@ function show(prompt, onAnswer) {
     el.onclick = () => choose(b.id);
     box.appendChild(el);
   });
+  if (prompt.busy) {
+    const el = document.createElement('button');
+    el.textContent = "I'm busy with something else · ask me in an hour";
+    el.className = 'quiet';
+    el.onclick = () => choose('busy');
+    box.appendChild(el);
+  }
   $('overlay').hidden = false;
   $('menu').hidden = true;
   if (prompt.input) setTimeout(() => $('stepInput').focus(), 50);
@@ -288,7 +319,7 @@ function choose(id) {
 function pickTask(firstId, step) {
   const now = new Date();
   st.lastOffer = Date.now();
-  st.session = startSession(orderCards(st.cards, priorityLists(), now, st.snoozed), firstId, step);
+  st.session = startSession(orderCards(st.cards, priorityLists(), now, st.snoozed), firstId, step, st.skips);
   persist();
   nextPrompt();
 }
@@ -298,9 +329,17 @@ function nextPrompt() {
   if (!s) return;
   const map = byId();
   const prompt = promptFor(s, map, new Date());
-  prompt.mode = s.step === 'empty' ? 'Choosing a task' : 'Choosing a task · card ' + (s.ci + 1) + ' of ' + s.order.length;
+  prompt.mode = s.step === 'empty' ? 'Choosing a task'
+    : (/sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task') + ' · card ' + (s.ci + 1) + ' of ' + s.order.length;
+  prompt.busy = s.step !== 'empty';
   show(prompt, (choice) => {
     log({ kind: 'session', step: s.step, cardId: s.order[s.ci], choice: choice });
+    if (choice === 'busy') { // already busy with something: no more cards for a while
+      st.session = null;
+      st.lastOffer = Date.now() + BUSY * MIN;
+      persist();
+      return;
+    }
     const r = answer(s, map, choice, new Date());
     st.session = r.next;
     run(r.effects);

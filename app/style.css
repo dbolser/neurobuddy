@@ -82,6 +82,7 @@ body[data-task] #clock { padding-bottom: 22vh; }
 #buttons button { flex: 1 1 40%; padding: 18px 10px; font-size: 19px; border-radius: 16px; border: 0;
   background: #2a2826; color: var(--fg); }
 #buttons button.yes { background: var(--yes); color: #04150a; font-weight: 600; }
+#buttons button.quiet { flex-basis: 100%; background: transparent; color: var(--dim); font-size: 15px; padding: 8px; }
 #buttons button.danger { background: var(--danger); color: #1a0402; font-weight: 600; }
 
 @media (orientation: landscape) {
@@ -96,7 +97,9 @@ body[data-task] #clock { padding-bottom: 22vh; }
   #sub { font-size: 16px; margin-top: 8px; }
   .hint { margin-top: 12px; }
   #buttons { max-width: 820px; margin-top: 12px; flex-wrap: nowrap; }
-  #buttons button { padding: 12px 8px; font-size: 17px; }
+  #buttons { flex-wrap: wrap; }
+  #buttons button { padding: 12px 8px; font-size: 17px; flex: 1 1 20%; }
+  #buttons button.quiet { padding: 4px; font-size: 14px; }
 }
 
 /* Menu / setup */

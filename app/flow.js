@@ -4,10 +4,14 @@
 
 export const DAY = 864e5;
 
+// Checklists named "Later…" hold steps sorted out as not needed yet ("send it ugly").
+export const LATER = 'Later (after it ships)';
+const isLater = (cl) => /^later/i.test(cl.name || '');
+
 // Incomplete checklist items, in order. A card with none is its own single hurdle.
 export function hurdles(card) {
   const items = [];
-  const lists = (card.checklists || []).slice().sort((a, b) => a.pos - b.pos);
+  const lists = (card.checklists || []).filter((cl) => !isLater(cl)).sort((a, b) => a.pos - b.pos);
   for (const cl of lists) {
     for (const it of cl.checkItems.slice().sort((a, b) => a.pos - b.pos)) {
       if (it.state !== 'complete') items.push({ id: it.id, name: it.name });
@@ -64,28 +68,42 @@ export function deadlineFor(choice, now) {
 }
 
 // ---- Session: a run of prompts that ends with a task picked (or none). ----
-// state = { order: [cardId], ci, hi, step }
-// steps: hurdle -> delay -> (setdue) ; delay(no) -> breakdown -> brainday
+// state = { order: [cardId], ci, hi, step, skips }
+// steps: hurdle -> [ugly -> sort… -> ship] -> delay -> (setdue) ; delay(keep) -> breakdown -> brainday
+// skips: cardId -> how many times every step on it was turned down.
 
-export function startSession(order, firstId, step) {
+// After this many full turn-downs, a card with 3+ steps gets the "send it ugly" sort.
+export const UGLY_AFTER = 2;
+
+export function startSession(order, firstId, step, skips) {
   const ids = order.map((c) => c.id);
   if (firstId) {
     const i = ids.indexOf(firstId);
     if (i > 0) ids.unshift(ids.splice(i, 1)[0]);
     if (i < 0) step = 'hurdle'; // that card isn't on offer (e.g. snoozed): normal session
   }
-  if (!ids.length) return { order: [], ci: 0, hi: 0, step: 'empty' };
-  return { order: ids, ci: 0, hi: 0, step: step || 'hurdle' };
+  if (!ids.length) return { order: [], ci: 0, hi: 0, step: 'empty', skips: skips || {} };
+  return { order: ids, ci: 0, hi: 0, step: step || 'hurdle', skips: skips || {} };
 }
 
 function nextCard(s) {
   return s.ci + 1 < s.order.length
-    ? { order: s.order, ci: s.ci + 1, hi: 0, step: 'hurdle' }
-    : { order: s.order, ci: s.ci, hi: 0, step: 'empty' };
+    ? with_(s, { ci: s.ci + 1, hi: 0, step: 'hurdle' })
+    : with_(s, { hi: 0, step: 'empty' });
 }
 
 function with_(s, patch) {
   return Object.assign({}, s, patch);
+}
+
+// Putting it off until tomorrow would miss the deadline (due before tomorrow noon).
+export function missesDeadline(card, now) {
+  return !!card.due && !card.dueComplete && new Date(card.due) < +startOfDay(now) + 1.5 * DAY;
+}
+
+// First step that wasn't sorted to Later (the last step is never offered for sorting).
+function firstKept(s) {
+  return s.items.filter((h) => s.moved.indexOf(h.id) < 0)[0];
 }
 
 // What to show. left/right label the swipe directions; `buttons` means pick one.
@@ -104,11 +122,24 @@ export function promptFor(s, byId, now) {
   // Right (green) always moves towards doing the task. Missing a deadline is a
   // button only, so a stray swipe can never do it.
   if (s.step === 'delay') {
-    return isUrgent(card, now)
-      ? { q: 'Then you miss the deadline?', title: card.name, sub: dueText(card, now), danger: true,
-        buttons: [{ id: 'keep', label: 'No, keep it', cls: 'yes' }, { id: 'miss', label: 'Yes, miss it', cls: 'danger' }] }
-      : { q: 'Put it off until tomorrow?', title: card.name, sub: dueText(card, now),
-        left: 'Put it off', right: 'No, keep it' };
+    const miss = missesDeadline(card, now);
+    return { q: 'Not now. When, then?', title: card.name, sub: dueText(card, now), danger: miss,
+      buttons: [{ id: 'keep', label: 'Keep it now', cls: 'yes' }, { id: 'later', label: 'Later today' },
+        miss ? { id: 'miss', label: 'Tomorrow (misses the deadline)', cls: 'danger' } : { id: 'tomorrow', label: 'Tomorrow' }] };
+  }
+  if (s.step === 'ugly') {
+    return { q: 'You keep skipping this. Too many steps?', title: card.name,
+      sub: 'Sort the steps: which are really needed before it ships?', left: 'No', right: 'Sort them' };
+  }
+  if (s.step === 'sort') {
+    const items = s.items;
+    return { q: 'Needed before it ships?', title: items[s.hi].name,
+      sub: card.name + ' · it ships with: ' + items[items.length - 1].name, left: 'Later', right: 'Needed' };
+  }
+  if (s.step === 'ship') {
+    const h = firstKept(s);
+    return { q: 'Ship it ugly?', title: h.name, sub: card.name + ' · the rest can follow',
+      left: 'Not now', right: 'Do it' };
   }
   if (s.step === 'setdue') {
     return { q: 'Give it a deadline?', title: card.name,
@@ -141,15 +172,52 @@ export function answer(s, byId, choice, now) {
       fx.push({ type: 'comment', cardId: card.id, text: 'Started: ' + h.name });
       return { next: null, effects: fx };
     }
-    return { next: s.hi + 1 < hs.length ? with_(s, { hi: s.hi + 1 }) : with_(s, { step: 'delay' }), effects: fx };
+    if (s.hi + 1 < hs.length) return { next: with_(s, { hi: s.hi + 1 }), effects: fx };
+    // Every step turned down.
+    fx.push({ type: 'skipped', cardId: card.id });
+    const ugly = hs.length >= 3 && hs[0].id && (s.skips[card.id] || 0) >= UGLY_AFTER;
+    return { next: with_(s, { hi: 0, step: ugly ? 'ugly' : 'delay' }), effects: fx };
+  }
+
+  if (s.step === 'ugly') {
+    // Snapshot the steps: the board may sync mid-sort and shift them.
+    return { next: choice === 'right'
+      ? with_(s, { hi: 0, step: 'sort', items: hurdles(card), moved: [] })
+      : with_(s, { hi: 0, step: 'delay' }), effects: fx };
+  }
+
+  if (s.step === 'sort') {
+    const h = s.items[s.hi];
+    let moved = s.moved;
+    if (choice === 'left') {
+      fx.push({ type: 'later', cardId: card.id, itemId: h.id, name: h.name });
+      moved = moved.concat([h.id]);
+    }
+    if (s.hi + 2 < s.items.length) return { next: with_(s, { hi: s.hi + 1, moved: moved }), effects: fx };
+    fx.push({ type: 'sorted', cardId: card.id });
+    return { next: with_(s, { hi: 0, step: 'ship', moved: moved }), effects: fx };
+  }
+
+  if (s.step === 'ship') {
+    if (choice === 'right') {
+      const h = firstKept(s);
+      fx.push({ type: 'start', cardId: card.id, itemId: h.id, name: h.name, cardName: card.name });
+      fx.push({ type: 'comment', cardId: card.id, text: 'Shipping it ugly; started: ' + h.name });
+      return { next: null, effects: fx };
+    }
+    return { next: with_(s, { step: 'delay' }), effects: fx };
   }
 
   if (s.step === 'delay') {
-    if (choice === 'left' || choice === 'miss') {
-      const urgent = isUrgent(card, now);
-      fx.push({ type: 'snooze', cardId: card.id });
+    if (choice === 'later') {
+      fx.push({ type: 'snooze', cardId: card.id, until: +now + 90 * 60e3 });
+      fx.push({ type: 'comment', cardId: card.id, text: 'Put off until later today' });
+      return { next: nextCard(s), effects: fx };
+    }
+    if (choice === 'tomorrow' || choice === 'miss') {
+      fx.push({ type: 'snooze', cardId: card.id, until: +startOfDay(+now + DAY) });
       fx.push({ type: 'comment', cardId: card.id,
-        text: urgent ? 'Chose to miss the deadline (' + dueText(card, now) + ')' : 'Put off until tomorrow' });
+        text: choice === 'miss' ? 'Chose to miss the deadline (' + dueText(card, now) + ')' : 'Put off until tomorrow' });
       return { next: card.due ? nextCard(s) : with_(s, { step: 'setdue' }), effects: fx };
     }
     return { next: with_(s, { step: 'breakdown' }), effects: fx };
