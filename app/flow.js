@@ -85,9 +85,10 @@ export function deadlineFor(choice, now) {
 }
 
 // ---- Session: a run of prompts that ends with a task picked (or none). ----
-// state = { order: [cardId], ci, hi, step, skips }
+// state = { order: [cardId], ci, hi, step, skips, snoozed }
 // steps: hurdle -> [ugly -> sort… -> ship] -> delay -> (setdue) ; delay(keep) -> breakdown -> brainday
 // skips: cardId -> how many times every step on it was turned down.
+// snoozed: cardId -> ms it was put off until (so a second put-off today goes further).
 
 // After this many full turn-downs, a card with 3+ steps gets the "send it ugly" sort.
 export const UGLY_AFTER = 2;
@@ -133,6 +134,13 @@ function firstKept(s) {
   return s.items.filter((h) => s.moved.indexOf(h.id) < 0)[0];
 }
 
+// Left swipe on "When, then?": later today, unless it was already put off today.
+function leftDelay(s, card, now) {
+  const until = (s.snoozed || {})[card.id];
+  if (!(until >= +startOfDay(now))) return 'later';
+  return missesDeadline(card, now) ? 'move' : 'tomorrow';
+}
+
 // What to show. left/right label the swipe directions; `buttons` means pick one.
 export function promptFor(s, byId, now) {
   if (s.step === 'back') {
@@ -151,13 +159,17 @@ export function promptFor(s, byId, now) {
       sub: (h.id ? card.name + ' · ' : '') + dueText(card, now),
       urgent: isUrgent(card, now), left: 'Not now', right: 'Do it' };
   }
-  // Right (green) always moves towards doing the task. Missing a deadline is a
-  // button only, so a stray swipe can never do it.
+  // Right (green) always moves towards doing the task. Left puts it off, and the
+  // more often today, the later: later today first, then the next workday (or a
+  // new deadline). The arrows show where a swipe goes.
   if (s.step === 'delay') {
     const miss = missesDeadline(card, now);
-    return { q: 'Not now. When, then?', title: card.name, sub: dueText(card, now),
-      buttons: [{ id: 'keep', label: 'Keep it now', cls: 'yes' }, { id: 'later', label: 'Later today' },
-        miss ? { id: 'move', label: 'New deadline' } : { id: 'tomorrow', label: nextWorkdayName(now) }] };
+    const far = miss ? { id: 'move', label: 'New deadline' } : { id: 'tomorrow', label: nextWorkdayName(now) };
+    const near = { id: 'later', label: 'Later today' };
+    const left = leftDelay(s, card, now);
+    [near, far].forEach((b) => { if (b.id === left) b.label = '← ' + b.label; });
+    return { q: 'Not now. When, then?', title: card.name, sub: dueText(card, now), left: 'later', right: 'keep',
+      buttons: [{ id: 'keep', label: 'Keep it now →', cls: 'yes' }, near, far] };
   }
   if (s.step === 'ugly') {
     return { q: 'You keep skipping this. Too many steps?', title: card.name,
@@ -198,7 +210,7 @@ export function answer(s, byId, choice, now) {
     if (choice === 'keep') return { next: null, effects: [{ type: 'resume' }] };
     if (choice === 'steps') return { next: null, effects: [{ type: 'addSteps', cardId: s.back }] };
     // Put it off: stop the task, then ask when (the usual later today / tomorrow / new deadline).
-    return { next: { order: [s.back], ci: 0, hi: 0, step: 'delay', skips: {} }, effects: [{ type: 'stop' }] };
+    return { next: { order: [s.back], ci: 0, hi: 0, step: 'delay', skips: {}, snoozed: s.snoozed }, effects: [{ type: 'stop' }] };
   }
   const card = byId[s.order[s.ci]];
   const fx = [];
@@ -250,6 +262,7 @@ export function answer(s, byId, choice, now) {
   }
 
   if (s.step === 'delay') {
+    if (choice === 'left') choice = leftDelay(s, card, now);
     if (choice === 'later') {
       fx.push({ type: 'snooze', cardId: card.id, until: +now + 90 * 60e3 });
       fx.push({ type: 'comment', cardId: card.id, text: 'Put off until later today' });

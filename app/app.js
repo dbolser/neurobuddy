@@ -340,6 +340,7 @@ function pickTask(firstId, step) {
   const now = new Date();
   st.lastOffer = Date.now();
   st.session = startSession(orderCards(st.cards, priorityLists(), now, st.snoozed), firstId, step, st.skips);
+  st.session.snoozed = st.snoozed;
   persist();
   nextPrompt();
 }
@@ -475,6 +476,7 @@ $('task').addEventListener('click', () => { if (!shown && Date.now() - swiped > 
 function switchAway() {
   st.lastOffer = Date.now();
   st.session = startSwitch(orderCards(st.cards, priorityLists(), new Date(), st.snoozed), st.current);
+  st.session.snoozed = st.snoozed;
   nextPrompt();
 }
 

@@ -37,7 +37,7 @@ test('swiping no walks the hurdles, then asks about the deadline', () => {
 
 test('keeping it leads to break-down, then brain-day, then back', () => {
   let s = { order: ['p'], ci: 0, hi: 0, step: 'delay' };
-  assert.ok(!promptFor(s, byId, now).right, 'putting off is never a swipe');
+  assert.equal(promptFor(s, byId, now).right, 'keep', 'right swipe keeps it');
   s = answer(s, byId, 'keep', now).next;
   assert.equal(s.step, 'breakdown');
   s = answer(s, byId, 'left', now).next;
@@ -151,4 +151,21 @@ test('swipe left on the current task: a few quick alternatives, then back to it'
   const sw = answer(startSwitch(orderCards(cards, order, now), cur), byId, 'right', now);
   assert.equal(sw.effects[0].cardId, 'p');
   assert.ok(sw.effects.some((e) => e.cardId === 'y' && /Switched away/.test(e.text)));
+});
+
+test('left on "when, then?": later today first, then further if already put off today', () => {
+  const free = { id: 'f', name: 'Dashboard', due: null, checklists: [] };
+  const due = { id: 'n', name: 'Alex list', due: '2026-11-19T12:00:00', checklists: [] };
+  const map = { f: free, n: due };
+  const at = (id, snoozed) => ({ order: [id], ci: 0, hi: 0, step: 'delay', skips: {}, snoozed: snoozed });
+  const first = answer(at('f', {}), map, 'left', now);
+  assert.equal(first.effects[0].until, +now + 90 * 60e3);
+  assert.ok(/← Later today/.test(promptFor(at('f', {}), map, now).buttons[1].label));
+  const again = { f: +now - 60e3, n: +now - 60e3 }; // put off earlier today, now back
+  const second = answer(at('f', again), map, 'left', now);
+  assert.ok(/Put off until/.test(second.effects[1].text) && !/later today/.test(second.effects[1].text));
+  assert.equal(answer(at('n', again), map, 'left', now).next.step, 'setdue', 'would miss the deadline: ask for a new one');
+  const old = { f: +now - 2 * 86400e3 }; // put off days ago: counts afresh
+  assert.equal(answer(at('f', old), map, 'left', now).effects[0].until, +now + 90 * 60e3);
+  assert.equal(answer(at('f', {}), map, 'right', now).next.step, 'breakdown', 'right keeps it');
 });
