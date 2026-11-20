@@ -27,6 +27,7 @@ It ends with **"Send it now with what's ready?"**
 **From:** "time to switch tasks, or get ready to switch task".
 **How:** the clock gives you a soft lead-in before a meeting or the end of a time block. Ten minutes before, the linear bar shows the meeting as a coloured block and the words clock says "meeting at half past". Five minutes before, a single card appears: **"Park it: one line on where you got to?"** That line is saved as a comment on the task, so picking it back up is easy.
 **Why it fits:** time blindness and costly task switching. Leaving a note for future-you removes the "where was I" cost.
+**Dan's add (20 Nov):** a linear timer counting down to the meeting, like the task strip.
 **Cost:** medium. Needs your calendar: a small job on outsee2, next to the digest, copies today's meetings into a hidden Trello card.
 
 ## 3. Done wall and the weekly list for Alex
@@ -35,6 +36,7 @@ It ends with **"Send it now with what's ready?"**
 **How:** at 17:30 the clock shows today's ticks as a list: **"Today you did: …"**. On Friday, one card shows the week's done list next to next week's top cards and asks **"Send this to Alex?"** One tap sends it. The digest on outsee2 already sends email.
 **Why it fits:** completed work becomes visible, which counters "I did nothing". Telling Alex is accountability to a person, and that works better than self-set deadlines.
 **Cost:** small for the done wall. Medium for sending email.
+**Dan's steer (20 Nov):** make the Friday review an email you pick up in a Claude session. The loop closes through Trello: that session reads the email, talks it through with you, then edits the board (new cards, deadlines, checklists, a "next week" list). The phone just reads Trello, so it acts on the review's results with no extra plumbing.
 
 ## 4. Focus sprint with a body double
 
