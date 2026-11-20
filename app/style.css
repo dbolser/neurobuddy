@@ -140,3 +140,7 @@ body[data-task] #clock { padding-bottom: 16vh; }
 body.testing::after { content: 'Claude is testing · hands off'; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   border: 8px solid var(--danger); pointer-events: none; z-index: 99; color: var(--danger);
   font-size: 14px; text-align: center; padding-top: 2px; }
+
+/* Letter-by-letter text changes (smooth.js) */
+#time .w, #ovTime .w { white-space: nowrap; }
+#time .c, #ovTime .c { display: inline-block; overflow: hidden; white-space: pre; vertical-align: bottom; }

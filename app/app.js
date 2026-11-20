@@ -1,5 +1,6 @@
 // NeuroBuddy: desk clock that pops up swipeable task cards from a Trello board.
 // Chrome 87 target (Galaxy A20e): no top-level await, no Array.at.
+import { smoothText } from './smooth.js';
 import { FACES, faceParts, faceName, digital, words, dayBar } from './clock.js';
 import { orderCards, startSession, startSwitch, promptFor, answer, startOfDay, DAY, LATER, splitSteps } from './flow.js';
 
@@ -193,7 +194,7 @@ function renderClock() {
   $('date').textContent = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   renderTask();
   const b = dayBar(now, cfg.start, cfg.end);
-  $('ovTime').textContent = words(now);
+  smoothText($('ovTime'), words(now));
   $('ovFill').style.width = (b.frac * 100).toFixed(2) + '%';
   const status = $('status');
   status.textContent = st.error || (st.synced ? 'synced ' + digital(new Date(st.synced)) : '');
@@ -229,7 +230,7 @@ function renderFace(now) {
   const big = p.words ? 'words' : 'digits';
   document.body.setAttribute('data-big', big);
   if (p.bar) document.body.setAttribute('data-bar', ''); else document.body.removeAttribute('data-bar');
-  $('time').textContent = big === 'words' ? words(now) : digital(now);
+  smoothText($('time'), big === 'words' ? words(now) : digital(now));
   $('small').textContent = p.words && p.digits ? digital(now) : '';
   $('time').hidden = !p.words && !p.digits;
   $('bar').hidden = !p.bar;
@@ -509,3 +510,4 @@ window.nbTesting = (on) => {
   if (on) testingTimer = setTimeout(() => window.nbTesting(false), 10 * MIN);
   return !!on;
 };
+window.nbSmooth = smoothText; // for remote testing
