@@ -1,7 +1,20 @@
 // Clock faces as pure functions (testable without a DOM).
 
-export const FACES = ['digital', 'words', 'linear'];
-export const FACE_NAMES = { digital: '12-hour', words: 'Words', linear: 'Linear day' };
+// A face is any mix of three parts: the day bar, the time in words, the digits.
+// The menu steps through every mix; the first is the default.
+export const FACES = ['bar+words', 'words', 'bar+digits', 'digits', 'words+digits', 'bar+words+digits', 'bar'];
+const OLD = { digital: 'digits', words: 'words+digits', linear: 'bar+words+digits' };
+
+export function faceParts(face) {
+  const f = FACES.indexOf(face) >= 0 ? face : OLD[face] || FACES[0];
+  const has = (p) => f.split('+').indexOf(p) >= 0;
+  return { face: f, bar: has('bar'), words: has('words'), digits: has('digits') };
+}
+
+export function faceName(face) {
+  const p = faceParts(face);
+  return [p.bar && 'day bar', p.words && 'words', p.digits && '2:05'].filter(Boolean).join(' + ');
+}
 
 export function hour12(h) { return h % 12 || 12; }
 

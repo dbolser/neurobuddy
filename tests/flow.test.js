@@ -37,18 +37,19 @@ test('swiping no walks the hurdles, then asks about the deadline', () => {
 
 test('refusing to miss the deadline leads to break-down, then brain-day, then back', () => {
   let s = { order: ['p'], ci: 0, hi: 0, step: 'delay' };
-  s = answer(s, byId, 'left', now).next;
+  assert.ok(!promptFor(s, byId, now).right, 'missing a deadline is never a swipe');
+  s = answer(s, byId, 'keep', now).next;
   assert.equal(s.step, 'breakdown');
   s = answer(s, byId, 'left', now).next;
   assert.equal(s.step, 'brainday');
-  s = answer(s, byId, 'left', now).next;
+  s = answer(s, byId, 'right', now).next;
   assert.equal(s.step, 'hurdle');
 });
 
 test('putting off a card with no deadline asks for one', () => {
   let s = startSession([wework]);
   s = answer(s, byId, 'left', now).next;
-  const r = answer(s, byId, 'right', now);
+  const r = answer(s, byId, 'left', now);
   assert.ok(r.effects.some((e) => e.type === 'snooze'));
   assert.equal(r.next.step, 'setdue');
   const r2 = answer(r.next, byId, 'friday', now);
@@ -61,6 +62,15 @@ test('swiping yes starts the task', () => {
   assert.equal(r.next, null);
   assert.equal(r.effects[0].type, 'start');
   assert.equal(r.effects[0].itemId, 'a');
+});
+
+test('swiping right never puts anything off', () => {
+  for (const step of ['hurdle', 'delay', 'breakdown', 'brainday']) {
+    for (const id of ['p', 'w']) {
+      const r = answer({ order: [id], ci: 0, hi: 0, step: step }, byId, 'right', now);
+      assert.ok(!r.effects.some((e) => e.type === 'snooze' || e.type === 'comment' && /Skipped/.test(e.text)), step);
+    }
+  }
 });
 
 test('deadline choices', () => {

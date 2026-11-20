@@ -1,11 +1,11 @@
 // NeuroBuddy: desk clock that pops up swipeable task cards from a Trello board.
 // Chrome 87 target (Galaxy A20e): no top-level await, no Array.at.
-import { FACES, FACE_NAMES, digital, words, dayBar } from './clock.js';
+import { FACES, faceParts, faceName, digital, words, dayBar } from './clock.js';
 import { orderCards, startSession, promptFor, answer, startOfDay, DAY } from './flow.js';
 
 const API = 'https://api.trello.com/1';
 const MIN = 60e3;
-const DEFAULTS = { checkin: 20, offer: 15, start: 9, end: 18, poll: 2, face: 'digital' }; // minutes / hours
+const DEFAULTS = { checkin: 20, offer: 15, start: 9, end: 18, poll: 2, face: 'bar+words' }; // minutes / hours
 const $ = (id) => document.getElementById(id);
 
 // ---------- storage (survives private-mode failures) ----------
@@ -151,18 +151,12 @@ function renderClock() {
   const now = new Date();
   renderFace(now);
   $('date').textContent = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-  const c = st.current;
-  $('current').innerHTML = '';
-  if (c) {
-    $('current').textContent = c.name;
-    if (c.cardName && c.cardName !== c.name) {
-      const s = document.createElement('small');
-      s.textContent = c.cardName + ' · ' + Math.round((Date.now() - c.since) / MIN) + ' min';
-      $('current').appendChild(s);
-    }
-  }
+  renderTask();
+  const b = dayBar(now, cfg.start, cfg.end);
+  $('ovTime').textContent = words(now);
+  $('ovFill').style.width = (b.frac * 100).toFixed(2) + '%';
   const status = $('status');
-  status.textContent = st.error || (st.synced ? 'synced ' + new Date(st.synced).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '');
+  status.textContent = st.error || (st.synced ? 'synced ' + digital(new Date(st.synced)) : '');
   status.className = st.error ? 'bad' : '';
   // Nudge the whole clock a few pixels each minute so nothing burns into the screen.
   if (now.getMinutes() !== lastMinute) {
@@ -172,13 +166,37 @@ function renderClock() {
   }
 }
 
+// The task strip: what you're on, and a bar that fills up to the next check-in.
+function renderTask() {
+  const c = st.current;
+  $('task').hidden = !c;
+  if (c) document.body.setAttribute('data-task', '');
+  else { document.body.removeAttribute('data-task'); return; }
+  const name = $('taskName');
+  name.textContent = c.name;
+  if (c.cardName && c.cardName !== c.name) {
+    const s = document.createElement('small');
+    s.textContent = '  ·  ' + c.cardName;
+    name.appendChild(s);
+  }
+  const frac = (Date.now() - st.lastCheck) / (cfg.checkin * MIN);
+  const left = Math.ceil(cfg.checkin - (Date.now() - st.lastCheck) / MIN);
+  $('taskFill').style.width = (Math.min(frac, 1) * 100).toFixed(1) + '%';
+  $('task').className = frac >= 1 ? 'late' : '';
+  $('taskNote').textContent = 'On it for ' + Math.round((Date.now() - c.since) / MIN) + ' min · ' +
+    (left > 0 ? 'check-in in ' + left + ' min' : 'check-in due') + ' · tap here when done';
+}
+
 function renderFace(now) {
-  const face = cfg.face;
-  document.body.setAttribute('data-face', face);
-  $('time').textContent = face === 'words' ? words(now) : digital(now);
-  $('small').textContent = face === 'words' ? digital(now) : face === 'linear' ? words(now) : '';
-  $('bar').hidden = face !== 'linear';
-  if (face === 'linear') {
+  const p = faceParts(cfg.face);
+  const big = p.words ? 'words' : 'digits';
+  document.body.setAttribute('data-big', big);
+  if (p.bar) document.body.setAttribute('data-bar', ''); else document.body.removeAttribute('data-bar');
+  $('time').textContent = big === 'words' ? words(now) : digital(now);
+  $('small').textContent = p.words && p.digits ? digital(now) : '';
+  $('time').hidden = !p.words && !p.digits;
+  $('bar').hidden = !p.bar;
+  if (p.bar) {
     const b = dayBar(now, cfg.start, cfg.end);
     const pct = (b.frac * 100).toFixed(2) + '%';
     $('fill').style.width = pct;
@@ -195,7 +213,7 @@ function renderFace(now) {
       });
     }
   }
-  $('faceBtn').textContent = 'Clock style: ' + FACE_NAMES[face];
+  $('faceBtn').textContent = 'Clock: ' + faceName(cfg.face) + '  (tap for next)';
 }
 
 // ---------- card overlay ----------
@@ -206,6 +224,7 @@ function show(prompt, onAnswer) {
   const card = $('card');
   card.className = (prompt.danger ? 'danger' : prompt.urgent ? 'urgent' : '');
   card.style.transform = '';
+  $('mode').textContent = prompt.mode || '';
   $('q').textContent = prompt.q || '';
   $('title').textContent = prompt.title;
   $('sub').textContent = prompt.sub || '';
@@ -278,7 +297,9 @@ function nextPrompt() {
   const s = st.session;
   if (!s) return;
   const map = byId();
-  show(promptFor(s, map, new Date()), (choice) => {
+  const prompt = promptFor(s, map, new Date());
+  prompt.mode = s.step === 'empty' ? 'Choosing a task' : 'Choosing a task · card ' + (s.ci + 1) + ' of ' + s.order.length;
+  show(prompt, (choice) => {
     log({ kind: 'session', step: s.step, cardId: s.order[s.ci], choice: choice });
     const r = answer(s, map, choice, new Date());
     st.session = r.next;
@@ -288,7 +309,7 @@ function nextPrompt() {
 }
 
 function askStep(cardId, cardName) {
-  show({ q: 'Smallest next step?', title: cardName, input: true,
+  show({ mode: 'Breaking it down', q: 'Smallest next step?', title: cardName, input: true,
     buttons: [{ id: 'cancel', label: 'Never mind' }, { id: 'add', label: 'Start it', cls: 'yes' }] }, (choice) => {
     const text = $('stepInput').value.trim();
     $('stepInput').value = '';
@@ -299,13 +320,13 @@ function askStep(cardId, cardName) {
 }
 $('stepForm').addEventListener('submit', (e) => { e.preventDefault(); choose('add'); });
 
-function checkin() {
+function checkin(byTap) {
   const c = st.current;
   if (!c) return pickTask();
   st.lastCheck = Date.now();
   persist();
   const mins = Math.round((Date.now() - c.since) / MIN);
-  show({ q: 'Still on this? (' + mins + ' min)', title: c.name, sub: c.cardName !== c.name ? c.cardName : '',
+  show({ mode: byTap ? 'Your task' : 'Check-in', q: 'Still on this? (' + mins + ' min)', title: c.name, sub: c.cardName !== c.name ? c.cardName : '',
     buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
       { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }] }, (choice) => {
     log({ kind: 'checkin', cardId: c.cardId, itemId: c.itemId, choice: choice, mins: mins });
@@ -363,6 +384,9 @@ function keepAwake() {
 }
 document.addEventListener('visibilitychange', () => { keepAwake(); if (document.visibilityState === 'visible') refresh(); });
 
+// ---------- tap the task strip: done / stuck / switching ----------
+$('task').addEventListener('click', () => { if (!shown) checkin(true); });
+
 // ---------- menu (tap the clock) ----------
 $('clock').addEventListener('click', () => { if (cfg.token) $('menu').hidden = false; });
 $('menu').addEventListener('click', (e) => {
@@ -370,13 +394,13 @@ $('menu').addEventListener('click', (e) => {
   if (!act) return;
   $('menu').hidden = true;
   if (act === 'face') {
-    cfg.face = FACES[(FACES.indexOf(cfg.face) + 1) % FACES.length];
+    cfg.face = FACES[(FACES.indexOf(faceParts(cfg.face).face) + 1) % FACES.length];
     save('cfg', cfg);
     renderClock();
     $('menu').hidden = false; // stay open so you can keep cycling
   } else if (act === 'pick') pickTask();
   else if (act === 'checkin') checkin();
-  else if (act === 'clear') { st.current = null; persist(); renderClock(); }
+  else if (act === 'clear') { log({ kind: 'clear', cardId: st.current && st.current.cardId }); st.current = null; persist(); renderClock(); }
   else if (act === 'refresh') refresh();
 });
 

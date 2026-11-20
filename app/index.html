@@ -15,9 +15,15 @@
     <div id="bar" hidden><div id="fill"></div><div id="now"></div><div id="ticks"></div></div>
     <div id="small"></div>
     <div id="date"></div>
-    <div id="current"></div>
     <div id="status"></div>
   </main>
+
+  <!-- The task you're on: tap it to say done / stuck / switching. -->
+  <div id="task" hidden>
+    <div id="taskName"></div>
+    <div class="mini"><div id="taskFill"></div></div>
+    <div id="taskNote"></div>
+  </div>
 
   <div id="menu" class="sheet" hidden>
     <button data-act="face" id="faceBtn">Clock style</button>
@@ -29,7 +35,9 @@
   </div>
 
   <div id="overlay" hidden>
+    <div id="ovClock"><span id="ovTime"></span><div class="mini"><div id="ovFill"></div></div></div>
     <div id="card">
+      <div id="mode"></div>
       <div id="q"></div>
       <div id="title"></div>
       <div id="sub"></div>

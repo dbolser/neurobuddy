@@ -101,12 +101,14 @@ export function promptFor(s, byId, now) {
       sub: (h.id ? card.name + ' · ' : '') + dueText(card, now),
       urgent: isUrgent(card, now), left: 'Not now', right: 'Do it' };
   }
+  // Right (green) always moves towards doing the task. Missing a deadline is a
+  // button only, so a stray swipe can never do it.
   if (s.step === 'delay') {
     return isUrgent(card, now)
-      ? { q: 'Then you miss the deadline?', title: card.name, sub: dueText(card, now),
-        danger: true, left: 'No', right: 'Yes, miss it' }
+      ? { q: 'Then you miss the deadline?', title: card.name, sub: dueText(card, now), danger: true,
+        buttons: [{ id: 'keep', label: 'No, keep it', cls: 'yes' }, { id: 'miss', label: 'Yes, miss it', cls: 'danger' }] }
       : { q: 'Put it off until tomorrow?', title: card.name, sub: dueText(card, now),
-        left: 'No', right: 'Put it off' };
+        left: 'Put it off', right: 'No, keep it' };
   }
   if (s.step === 'setdue') {
     return { q: 'Give it a deadline?', title: card.name,
@@ -119,13 +121,13 @@ export function promptFor(s, byId, now) {
   }
   if (s.step === 'brainday') {
     return { q: 'Bad brain day?', title: 'Do something completely different',
-      sub: 'Skip ' + card.name + ' for now', left: 'No, back to it', right: 'Yes' };
+      sub: 'Skip ' + card.name + ' for now', left: 'Yes, skip it', right: 'No, back to it' };
   }
   throw new Error('unknown step ' + s.step);
 }
 
 // Returns { next: state|null, effects: [...] }. next null = session over.
-// choice: 'left' | 'right' | button id.
+// choice: 'left' | 'right' | button id. Right always leads towards doing the task.
 export function answer(s, byId, choice, now) {
   if (s.step === 'empty') return { next: null, effects: [{ type: 'idle' }] };
   const card = byId[s.order[s.ci]];
@@ -143,7 +145,7 @@ export function answer(s, byId, choice, now) {
   }
 
   if (s.step === 'delay') {
-    if (choice === 'right') {
+    if (choice === 'left' || choice === 'miss') {
       const urgent = isUrgent(card, now);
       fx.push({ type: 'snooze', cardId: card.id });
       fx.push({ type: 'comment', cardId: card.id,
@@ -165,7 +167,7 @@ export function answer(s, byId, choice, now) {
   }
 
   if (s.step === 'brainday') {
-    if (choice === 'right') {
+    if (choice === 'left') {
       fx.push({ type: 'comment', cardId: card.id, text: 'Skipped (bad brain day)' });
       return { next: nextCard(s), effects: fx };
     }

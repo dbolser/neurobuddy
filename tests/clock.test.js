@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { digital, words, dayBar } from '../app/clock.js';
+import { digital, words, dayBar, faceParts, FACES } from '../app/clock.js';
 
 const at = (h, m, s) => new Date(2026, 10, 19, h, m, s || 0);
 
@@ -28,4 +28,11 @@ test('linear day bar', () => {
   assert.equal(b.ticks[4].label, '1');
   const late = dayBar(at(21, 0), 9, 18);
   assert.equal(late.to, 22);
+});
+
+test('faces are mixes of bar, words and digits', () => {
+  assert.equal(FACES.length, 7);
+  assert.deepEqual(faceParts('bar+words'), { face: 'bar+words', bar: true, words: true, digits: false });
+  assert.equal(faceParts('linear').face, 'bar+words+digits');
+  assert.equal(faceParts(undefined).face, 'bar+words');
 });
