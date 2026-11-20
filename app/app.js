@@ -1,7 +1,7 @@
 // NeuroBuddy: desk clock that pops up swipeable task cards from a Trello board.
 // Chrome 87 target (Galaxy A20e): no top-level await, no Array.at.
 import { FACES, faceParts, faceName, digital, words, dayBar } from './clock.js';
-import { orderCards, startSession, promptFor, answer, startOfDay, DAY, LATER, splitSteps } from './flow.js';
+import { orderCards, startSession, startSwitch, promptFor, answer, startOfDay, DAY, LATER, splitSteps } from './flow.js';
 
 const API = 'https://api.trello.com/1';
 const MIN = 60e3;
@@ -120,6 +120,13 @@ function run(effects) {
       writes.push(trello('PUT', '/cards/' + e.cardId, { due: e.due }));
     } else if (e.type === 'askStep') {
       askSteps(e.cardId, e.cardName, true);
+    } else if (e.type === 'resume') {
+      st.lastCheck = Date.now();
+    } else if (e.type === 'stop') {
+      st.current = null;
+    } else if (e.type === 'addSteps') {
+      const card = byId()[e.cardId];
+      askSteps(e.cardId, card ? card.name : '', false);
     } else if (e.type === 'idle') {
       st.lastOffer = Date.now();
     }
@@ -213,11 +220,8 @@ function renderTask() {
     name.appendChild(s);
   }
   const frac = (Date.now() - st.lastCheck) / (cfg.checkin * MIN);
-  const left = Math.ceil(cfg.checkin - (Date.now() - st.lastCheck) / MIN);
   $('taskFill').style.width = (Math.min(frac, 1) * 100).toFixed(1) + '%';
-  $('task').className = frac >= 1 ? 'late' : '';
-  $('taskNote').textContent = 'On it for ' + Math.round((Date.now() - c.since) / MIN) + ' min · ' +
-    (left > 0 ? 'check-in in ' + left + ' min' : 'check-in due') + ' · tap here when done';
+  $('task').classList.toggle('late', frac >= 1);
 }
 
 function renderFace(now) {
@@ -296,34 +300,36 @@ function choose(id) {
   s.onAnswer(id);
 }
 
-// Swipe: drag the card past ~1/4 screen width to answer.
-(function swipe() {
-  const card = $('card');
+// Swipe: drag past ~1/4 screen width to answer. Used on cards and the task strip.
+let swiped = 0; // time of the last swipe, so its pointerup doesn't also count as a tap
+function attachSwipe(el, canStart, onSwipe) {
   let x0 = null, dx = 0;
-  card.addEventListener('pointerdown', (e) => {
-    if (!shown || !shown.prompt.left || e.target.tagName === 'INPUT') return;
-    x0 = e.clientX; dx = 0; card.classList.remove('snap'); card.setPointerCapture(e.pointerId);
+  el.addEventListener('pointerdown', (e) => {
+    if (!canStart() || e.target.tagName === 'INPUT') return;
+    x0 = e.clientX; dx = 0; el.classList.remove('snap'); el.setPointerCapture(e.pointerId);
   });
-  card.addEventListener('pointermove', (e) => {
+  el.addEventListener('pointermove', (e) => {
     if (x0 === null) return;
     dx = e.clientX - x0;
-    card.style.transform = 'translateX(' + dx + 'px) rotate(' + dx / 25 + 'deg)';
-    card.classList.toggle('lean-right', dx > 40);
-    card.classList.toggle('lean-left', dx < -40);
+    el.style.transform = 'translateX(' + dx + 'px) rotate(' + dx / 25 + 'deg)';
+    el.classList.toggle('lean-right', dx > 40);
+    el.classList.toggle('lean-left', dx < -40);
   });
   const end = () => {
     if (x0 === null) return;
     x0 = null;
-    card.classList.add('snap');
-    card.classList.remove('lean-right', 'lean-left');
+    el.classList.add('snap');
+    el.classList.remove('lean-right', 'lean-left');
+    if (Math.abs(dx) > 10) swiped = Date.now();
     if (Math.abs(dx) > window.innerWidth / 4) {
-      card.style.transform = 'translateX(' + (dx > 0 ? 1 : -1) * window.innerWidth + 'px)';
-      setTimeout(() => choose(dx > 0 ? 'right' : 'left'), 180);
-    } else card.style.transform = '';
+      el.style.transform = 'translateX(' + (dx > 0 ? 1 : -1) * window.innerWidth + 'px)';
+      setTimeout(() => { onSwipe(dx > 0 ? 'right' : 'left'); el.style.transform = ''; }, 180);
+    } else el.style.transform = '';
   };
-  card.addEventListener('pointerup', end);
-  card.addEventListener('pointercancel', end);
-})();
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+}
+attachSwipe($('card'), () => !!(shown && shown.prompt.left), choose);
 
 // ---------- sessions & check-ins ----------
 function pickTask(firstId, step) {
@@ -339,7 +345,8 @@ function nextPrompt() {
   if (!s) return;
   const map = byId();
   const prompt = promptFor(s, map, new Date());
-  prompt.mode = s.step === 'empty' ? 'Choosing a task'
+  prompt.mode = s.quick ? (s.step === 'back' ? 'Your task' : 'Something else? · ' + (s.ci + 1) + ' of ' + s.order.length)
+    : s.step === 'empty' ? 'Choosing a task'
     : s.step === 'breakdown' ? 'Breaking it down'
     : (/sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task') + ' · card ' + (s.ci + 1) + ' of ' + s.order.length;
   prompt.busy = s.step !== 'empty';
@@ -396,7 +403,7 @@ function checkin(byTap) {
     buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
       { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }] }, (choice) => {
     log({ kind: 'checkin', cardId: c.cardId, itemId: c.itemId, choice: choice, mins: mins });
-    if (choice === 'done') completeCurrent().then(() => pickTask());
+    if (choice === 'done') completeCurrent().then(() => pickTask(c.cardId));
     else if (choice === 'steps') askSteps(c.cardId, c.cardName || c.name, false);
     else if (choice === 'switch') {
       run([{ type: 'comment', cardId: c.cardId, text: 'Switched away after ' + mins + ' min from: ' + c.name }]);
@@ -451,8 +458,20 @@ function keepAwake() {
 }
 document.addEventListener('visibilitychange', () => { keepAwake(); if (document.visibilityState === 'visible') refresh(); });
 
-// ---------- tap the task strip: done / stuck / switching ----------
-$('task').addEventListener('click', () => { if (!shown) checkin(true); });
+// ---------- the task strip: swipe right = done, left = something else, tap = check in ----------
+attachSwipe($('task'), () => !shown && !!st.current, (dir) => {
+  const c = st.current;
+  log({ kind: 'strip', cardId: c.cardId, itemId: c.itemId, choice: dir });
+  if (dir === 'right') completeCurrent().then(() => pickTask(c.cardId));
+  else switchAway();
+});
+$('task').addEventListener('click', () => { if (!shown && Date.now() - swiped > 400) checkin(true); });
+
+function switchAway() {
+  st.lastOffer = Date.now();
+  st.session = startSwitch(orderCards(st.cards, priorityLists(), new Date(), st.snoozed), st.current);
+  nextPrompt();
+}
 
 // ---------- menu (tap the clock) ----------
 $('clock').addEventListener('click', () => { if (cfg.token) $('menu').hidden = false; });

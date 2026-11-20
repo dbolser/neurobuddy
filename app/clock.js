@@ -25,21 +25,20 @@ export function digital(d) {
 }
 
 const NUM = ['twelve', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
-const PAST = { 5: 'five past', 10: 'ten past', 15: 'quarter past', 20: 'twenty past', 25: 'twenty-five past', 30: 'half past' };
-const TO = { 35: 'twenty-five to', 40: 'twenty to', 45: 'quarter to', 50: 'ten to', 55: 'five to' };
 
-// 14:17 -> "just after quarter past two"; 14:58 -> "nearly three o'clock".
+// To the nearest quarter, the way people say it:
+// 11:13 -> "nearly quarter past eleven"; 11:24 -> "nearly half eleven"; 11:47 -> "quarter to twelve".
 export function words(d) {
   const min = d.getMinutes() + d.getSeconds() / 60;
-  let m5 = Math.round(min / 5) * 5;
+  let q = Math.round(min / 15) * 15;
   let h = d.getHours();
-  const off = min - m5;
-  if (m5 === 60) { m5 = 0; h += 1; }
-  const prefix = off >= 1 ? 'just after ' : off <= -1 ? 'nearly ' : '';
-  let core;
-  if (m5 === 0) core = NUM[h % 12] + " o'clock";
-  else if (m5 <= 30) core = PAST[m5] + ' ' + NUM[h % 12];
-  else core = TO[m5] + ' ' + NUM[(h + 1) % 12];
+  const off = min - q;
+  if (q === 60) { q = 0; h += 1; }
+  const prefix = off >= 3 ? 'just after ' : off <= -3 ? 'nearly ' : '';
+  const core = q === 0 ? NUM[h % 12] + " o'clock"
+    : q === 15 ? 'quarter past ' + NUM[h % 12]
+    : q === 30 ? 'half ' + NUM[h % 12]
+    : 'quarter to ' + NUM[(h + 1) % 12];
   return prefix + core;
 }
 

@@ -103,7 +103,17 @@ export function startSession(order, firstId, step, skips) {
   return { order: ids, ci: 0, hi: 0, step: step || 'hurdle', skips: skips || {} };
 }
 
+// Swiped left on the task you're on: show a few other cards (one swipe each),
+// then come back to it with big buttons. current = { cardId, name }.
+export const SWITCH_CHOICES = 3;
+export function startSwitch(order, current) {
+  const ids = order.map((c) => c.id).filter((id) => id !== current.cardId).slice(0, SWITCH_CHOICES);
+  return { order: ids, ci: 0, hi: 0, step: ids.length ? 'hurdle' : 'back', skips: {}, quick: true,
+    back: current.cardId, backName: current.name };
+}
+
 function nextCard(s) {
+  if (s.quick) return s.ci + 1 < s.order.length ? with_(s, { ci: s.ci + 1, hi: 0 }) : with_(s, { step: 'back' });
   return s.ci + 1 < s.order.length
     ? with_(s, { ci: s.ci + 1, hi: 0, step: 'hurdle' })
     : with_(s, { hi: 0, step: 'empty' });
@@ -125,6 +135,11 @@ function firstKept(s) {
 
 // What to show. left/right label the swipe directions; `buttons` means pick one.
 export function promptFor(s, byId, now) {
+  if (s.step === 'back') {
+    return { q: 'None of those. Back to this?', title: s.backName,
+      buttons: [{ id: 'keep', label: 'Keep going', cls: 'yes' }, { id: 'steps', label: 'Break it down' },
+        { id: 'putoff', label: 'Put it off' }] };
+  }
   if (s.step === 'empty') {
     return { title: 'Nothing picked', sub: "That's fine. Take a proper break — I'll ask again later.",
       buttons: [{ id: 'ok', label: 'OK' }] };
@@ -179,6 +194,12 @@ export function promptFor(s, byId, now) {
 // choice: 'left' | 'right' | button id. Right always leads towards doing the task.
 export function answer(s, byId, choice, now) {
   if (s.step === 'empty') return { next: null, effects: [{ type: 'idle' }] };
+  if (s.step === 'back') {
+    if (choice === 'keep') return { next: null, effects: [{ type: 'resume' }] };
+    if (choice === 'steps') return { next: null, effects: [{ type: 'addSteps', cardId: s.back }] };
+    // Put it off: stop the task, then ask when (the usual later today / tomorrow / new deadline).
+    return { next: { order: [s.back], ci: 0, hi: 0, step: 'delay', skips: {} }, effects: [{ type: 'stop' }] };
+  }
   const card = byId[s.order[s.ci]];
   const fx = [];
 
@@ -188,8 +209,10 @@ export function answer(s, byId, choice, now) {
     if (choice === 'right') {
       fx.push({ type: 'start', cardId: card.id, itemId: h.id, name: h.name, cardName: card.name });
       fx.push({ type: 'comment', cardId: card.id, text: 'Started: ' + h.name });
+      if (s.back) fx.push({ type: 'comment', cardId: s.back, text: 'Switched away from: ' + s.backName });
       return { next: null, effects: fx };
     }
+    if (s.quick) return { next: nextCard(s), effects: fx }; // one swipe per card
     if (s.hi + 1 < hs.length) return { next: with_(s, { hi: s.hi + 1 }), effects: fx };
     // Every step turned down.
     fx.push({ type: 'skipped', cardId: card.id });

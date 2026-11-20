@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, splitSteps, LATER, DAY } from '../app/flow.js';
+import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, splitSteps, startSwitch, LATER, DAY } from '../app/flow.js';
 
 const now = new Date('2026-11-19T10:00:00');
 const L = { today: 'T', week: 'W', later: 'L', done: 'D' };
@@ -133,4 +133,22 @@ test('numbered brain dumps split into steps', () => {
     ['Find the thread.', 'Try the /recall skill on it', 'write up']);
   assert.deepEqual(splitSteps('email Julian; check figures'), ['email Julian', 'check figures']);
   assert.deepEqual(splitSteps('Run v2 of the model'), ['Run v2 of the model']);
+});
+
+test('swipe left on the current task: a few quick alternatives, then back to it', () => {
+  const cur = { cardId: 'y', name: 'Search site' };
+  let s = startSwitch(orderCards(cards, order, now), cur);
+  assert.deepEqual(s.order, ['p', 'w'], 'the current card is not offered');
+  s = answer(s, byId, 'left', now).next;
+  assert.equal(s.ci, 1, 'one swipe per card, no hurdle walk');
+  s = answer(s, byId, 'left', now).next;
+  assert.equal(s.step, 'back');
+  assert.equal(promptFor(s, byId, now).title, 'Search site');
+  assert.equal(answer(s, byId, 'keep', now).effects[0].type, 'resume');
+  const off = answer(s, byId, 'putoff', now);
+  assert.equal(off.effects[0].type, 'stop');
+  assert.equal(off.next.step, 'delay');
+  const sw = answer(startSwitch(orderCards(cards, order, now), cur), byId, 'right', now);
+  assert.equal(sw.effects[0].cardId, 'p');
+  assert.ok(sw.effects.some((e) => e.cardId === 'y' && /Switched away/.test(e.text)));
 });

@@ -31,7 +31,10 @@ button { font: inherit; }
 #taskName { font-size: min(5.5vw, 6vh); color: var(--accent); margin-bottom: 10px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #taskName small { color: var(--dim); font-size: 0.7em; }
-#taskNote { font-size: min(3.5vw, 4.5vh); color: var(--dim); margin-top: 6px; }
+#task { touch-action: none; border-top: 2px solid transparent; }
+#task.snap { transition: transform 0.25s ease-out; }
+#task.lean-right #taskName { color: var(--yes); }
+#task.lean-left #taskName { color: var(--dim); }
 #task.late #taskFill { background: #c9a227; }
 #status.bad { color: var(--danger); }
 @media (orientation: landscape) {
@@ -44,7 +47,7 @@ button { font: inherit; }
 body[data-big="words"] #time { font-size: min(13vw, 14vh); font-weight: 300; line-height: 1.15; max-width: 95vw; }
 body[data-bar][data-big="digits"] #time { font-size: min(18vw, 22vh); }
 /* Leave room for the task strip at the bottom */
-body[data-task] #clock { padding-bottom: 22vh; }
+body[data-task] #clock { padding-bottom: 16vh; }
 #bar { position: relative; width: 88vw; height: 7vh; min-height: 28px; margin: 4vh 0 calc(6vh + min(3.5vw, 5vh));
   background: #1c1b1a; border-radius: 12px; }
 #fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 12px 0 0 12px;
