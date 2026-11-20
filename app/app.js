@@ -499,3 +499,13 @@ else {
   setInterval(tick, 15e3);
   setInterval(refresh, cfg.poll * MIN);
 }
+
+// ---------- remote testing (over DevTools): red border so Dan knows not to touch ----------
+// nbTesting(true) before driving the phone, nbTesting(false) after; it clears itself after 10 min.
+let testingTimer = null;
+window.nbTesting = (on) => {
+  document.body.classList.toggle('testing', !!on);
+  clearTimeout(testingTimer);
+  if (on) testingTimer = setTimeout(() => window.nbTesting(false), 10 * MIN);
+  return !!on;
+};

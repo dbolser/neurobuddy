@@ -135,3 +135,8 @@ body[data-task] #clock { padding-bottom: 16vh; }
 #overlay.typing #stepInput { margin-top: 8px; padding: 10px; font-size: 18px; }
 #overlay.typing #buttons { margin-top: 8px; flex-wrap: nowrap; }
 #overlay.typing #buttons button { padding: 10px 8px; font-size: 16px; }
+
+/* Claude is driving the phone remotely: hands off */
+body.testing::after { content: 'Claude is testing · hands off'; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  border: 8px solid var(--danger); pointer-events: none; z-index: 99; color: var(--danger);
+  font-size: 14px; text-align: center; padding-top: 2px; }
