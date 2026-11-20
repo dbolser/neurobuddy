@@ -30,6 +30,7 @@ const st = {
   skips: load('skips', {}),        // cardId -> times every step was turned down
   lastCheck: load('lastCheck', 0),
   lastOffer: load('lastOffer', 0),
+  missed: load('missed', false),     // the last check-in went unanswered
   session: null,
   synced: 0,
   error: '',
@@ -38,12 +39,13 @@ const st = {
 function persist() {
   save('lists', st.lists); save('cards', st.cards); save('current', st.current);
   save('snoozed', st.snoozed); save('skips', st.skips); save('lastCheck', st.lastCheck); save('lastOffer', st.lastOffer);
+  save('missed', st.missed);
 }
 
 // Another window of the app changed state: take it, rather than overwrite it later.
 window.addEventListener('storage', (e) => {
   if (!e.key || e.key.indexOf('nb.') !== 0) return;
-  ['current', 'snoozed', 'skips', 'lastCheck', 'lastOffer'].forEach((k) => { st[k] = load(k, st[k]); });
+  ['current', 'snoozed', 'skips', 'lastCheck', 'lastOffer', 'missed'].forEach((k) => { st[k] = load(k, st[k]); });
   renderClock();
 });
 
@@ -257,9 +259,16 @@ function renderFace(now) {
 
 // ---------- card overlay ----------
 let shown = null; // { prompt, onAnswer }
+let expiry = null;
 
+// prompt.timeout (ms): unanswered by then, the card goes away and onTimeout runs.
 function show(prompt, onAnswer) {
   shown = { prompt: prompt, onAnswer: onAnswer };
+  clearTimeout(expiry);
+  if (prompt.timeout) {
+    const mine = shown;
+    expiry = setTimeout(() => { if (shown === mine) { hide(); prompt.onTimeout && prompt.onTimeout(); } }, prompt.timeout);
+  }
   const card = $('card');
   card.className = (prompt.danger ? 'danger' : prompt.urgent ? 'urgent' : '');
   card.style.transform = '';
@@ -293,7 +302,7 @@ function show(prompt, onAnswer) {
   else alertUser();
 }
 
-function hide() { shown = null; $('overlay').hidden = true; }
+function hide() { shown = null; clearTimeout(expiry); $('overlay').hidden = true; }
 
 function choose(id) {
   if (!shown) return;
@@ -398,17 +407,36 @@ $('stepForm').addEventListener('submit', (e) => {
   $('sub').textContent = typed.map((x, i) => (i + 1) + '. ' + x).join('   ');
 });
 
+const CHECKIN_SHOWN = 5; // minutes an unanswered check-in stays up
+
 function checkin(byTap) {
   const c = st.current;
   if (!c) return pickTask();
   st.lastCheck = Date.now();
   persist();
   const mins = Math.round((Date.now() - c.since) / MIN);
-  show({ mode: byTap ? 'Your task' : 'Check-in', q: 'Still on this? (' + mins + ' min)', title: c.name, sub: c.cardName !== c.name ? c.cardName : '',
-    buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
-      { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }] }, (choice) => {
+  const sub = c.cardName !== c.name ? c.cardName : '';
+  // A check-in nobody answers goes away after a few minutes: back to the clock, no nagging.
+  // The next one asks why, without blame.
+  const missed = st.missed && !byTap;
+  const prompt = missed
+    ? { mode: 'Check-in', q: 'Missed the last check-in. How come?', title: c.name, sub: sub,
+      buttons: [{ id: 'focused', label: 'Hyper-focused', cls: 'yes' }, { id: 'distracted', label: 'Distracted' },
+        { id: 'stuck', label: 'Stuck' }, { id: 'done', label: 'Done ✓' }] }
+    : { mode: byTap ? 'Your task' : 'Check-in', q: 'Still on this? (' + mins + ' min)', title: c.name, sub: sub,
+      buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
+        { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }] };
+  if (!byTap) {
+    prompt.timeout = CHECKIN_SHOWN * MIN;
+    prompt.onTimeout = () => { st.missed = true; persist(); log({ kind: 'checkin', cardId: c.cardId, choice: 'missed', mins: mins }); };
+  }
+  show(prompt, (choice) => {
     log({ kind: 'checkin', cardId: c.cardId, itemId: c.itemId, choice: choice, mins: mins });
-    if (choice === 'done') completeCurrent().then(() => pickTask(c.cardId));
+    st.missed = false;
+    persist();
+    if (choice === 'focused' || choice === 'distracted') {
+      run([{ type: 'comment', cardId: c.cardId, text: (choice === 'focused' ? 'Hyper-focused on: ' : 'Got distracted from: ') + c.name + ' (' + mins + ' min in)' }]);
+    } else if (choice === 'done') completeCurrent().then(() => pickTask(c.cardId));
     else if (choice === 'steps') askSteps(c.cardId, c.cardName || c.name, false);
     else if (choice === 'switch') {
       run([{ type: 'comment', cardId: c.cardId, text: 'Switched away after ' + mins + ' min from: ' + c.name }]);
