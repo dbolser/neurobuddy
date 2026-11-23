@@ -86,7 +86,7 @@ export function deadlineFor(choice, now) {
 
 // ---- Session: a run of prompts that ends with a task picked (or none). ----
 // state = { order: [cardId], ci, hi, step, skips, snoozed }
-// steps: hurdle -> [ugly -> sort… -> ship] -> delay -> (setdue) ; delay(keep) -> breakdown -> brainday
+// steps: hurdle (the card's next step; left puts the card off) -> [ugly -> sort… -> ship] ; delay -> (setdue) ; delay(keep) -> breakdown -> brainday
 // skips: cardId -> how many times every step on it was turned down.
 // snoozed: cardId -> ms it was put off until (so a second put-off today goes further).
 
@@ -139,6 +139,19 @@ function leftDelay(s, card, now) {
   const until = (s.snoozed || {})[card.id];
   if (!(until >= +startOfDay(now))) return 'later';
   return missesDeadline(card, now) ? 'move' : 'tomorrow';
+}
+
+// Put the card off: 'later' (90 min), 'tomorrow' (next workday) or 'move' (new deadline).
+function putOff(s, card, how, now, fx) {
+  if (how === 'later') {
+    fx.push({ type: 'snooze', cardId: card.id, until: +now + 90 * 60e3 });
+    fx.push({ type: 'comment', cardId: card.id, text: 'Put off until later today' });
+    return { next: nextCard(s), effects: fx };
+  }
+  fx.push({ type: 'snooze', cardId: card.id, until: +startOfDay(+now + DAY) });
+  if (how === 'tomorrow') fx.push({ type: 'comment', cardId: card.id, text: 'Put off until ' + nextWorkdayName(now) });
+  // Moving the deadline (or a card without one) asks for the new date.
+  return { next: card.due && how === 'tomorrow' ? nextCard(s) : with_(s, { step: 'setdue' }), effects: fx };
 }
 
 // What to show. left/right label the swipe directions; `buttons` means pick one.
@@ -225,11 +238,11 @@ export function answer(s, byId, choice, now) {
       return { next: null, effects: fx };
     }
     if (s.quick) return { next: nextCard(s), effects: fx }; // one swipe per card
-    if (s.hi + 1 < hs.length) return { next: with_(s, { hi: s.hi + 1 }), effects: fx };
-    // Every step turned down.
+    // One card per task (its next step): left puts the whole task off, no second "when?" card.
     fx.push({ type: 'skipped', cardId: card.id });
     const ugly = hs.length >= 3 && hs[0].id && (s.skips[card.id] || 0) >= UGLY_AFTER;
-    return { next: with_(s, { hi: 0, step: ugly ? 'ugly' : 'delay' }), effects: fx };
+    if (ugly) return { next: with_(s, { hi: 0, step: 'ugly' }), effects: fx };
+    return putOff(s, card, leftDelay(s, card, now), now, fx);
   }
 
   if (s.step === 'ugly') {
@@ -263,17 +276,7 @@ export function answer(s, byId, choice, now) {
 
   if (s.step === 'delay') {
     if (choice === 'left') choice = leftDelay(s, card, now);
-    if (choice === 'later') {
-      fx.push({ type: 'snooze', cardId: card.id, until: +now + 90 * 60e3 });
-      fx.push({ type: 'comment', cardId: card.id, text: 'Put off until later today' });
-      return { next: nextCard(s), effects: fx };
-    }
-    if (choice === 'tomorrow' || choice === 'move') {
-      fx.push({ type: 'snooze', cardId: card.id, until: +startOfDay(+now + DAY) });
-      if (choice === 'tomorrow') fx.push({ type: 'comment', cardId: card.id, text: 'Put off until ' + nextWorkdayName(now) });
-      // Moving the deadline (or a card without one) asks for the new date.
-      return { next: card.due && choice === 'tomorrow' ? nextCard(s) : with_(s, { step: 'setdue' }), effects: fx };
-    }
+    if (choice === 'later' || choice === 'tomorrow' || choice === 'move') return putOff(s, card, choice, now, fx);
     return { next: with_(s, { step: 'breakdown' }), effects: fx };
   }
 

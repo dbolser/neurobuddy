@@ -26,13 +26,16 @@ test('urgent cards first, then list order; done and snoozed excluded', () => {
   assert.deepEqual(orderCards(cards, order, now, { p: +now + 1000 }).map((c) => c.id), ['y', 'w']);
 });
 
-test('swiping no walks the hurdles, then asks about the deadline', () => {
+test('one card per task: its next step; left puts the task off and moves on', () => {
   let s = startSession(orderCards(cards, order, now));
   assert.equal(promptFor(s, byId, now).title, 'Rerun');
+  const r = answer(s, byId, 'left', now);
+  assert.equal(r.effects.filter((e) => e.type === 'snooze')[0].until, +now + 90 * 60e3, 'later today');
+  s = r.next;
+  assert.equal(s.step, 'hurdle');
+  assert.equal(promptFor(s, byId, now).title, 'Search site', 'next task, not the same task again');
   s = answer(s, byId, 'left', now).next;
-  const p = promptFor(s, byId, now);
-  assert.equal(s.step, 'delay');
-  assert.ok(p.buttons.some((b) => b.id === 'move'), 'due 10am tomorrow: offers a new deadline');
+  assert.equal(promptFor(s, byId, now).title, 'Reply to WeWork', 'not the second step of the same card');
 });
 
 test('keeping it leads to break-down, then brain-day, then back', () => {
@@ -47,8 +50,7 @@ test('keeping it leads to break-down, then brain-day, then back', () => {
 });
 
 test('putting off a card with no deadline asks for one', () => {
-  let s = startSession([wework]);
-  s = answer(s, byId, 'left', now).next;
+  const s = { order: ['w'], ci: 0, hi: 0, step: 'delay', skips: {} };
   const r = answer(s, byId, 'tomorrow', now);
   assert.ok(r.effects.some((e) => e.type === 'snooze'));
   assert.equal(r.next.step, 'setdue');
@@ -105,7 +107,6 @@ const bigMap = { b: big };
 test('send it ugly: after repeated skips, sort the steps, then ship with what is needed', () => {
   assert.deepEqual(hurdles(big).map((h) => h.id), ['s1', 's2', 's3', 's4'], 'Later checklist is not a hurdle');
   let s = startSession([big], null, null, { b: 2 });
-  for (let i = 0; i < 3; i++) s = answer(s, bigMap, 'left', now).next;
   const r = answer(s, bigMap, 'left', now);
   assert.ok(r.effects.some((e) => e.type === 'skipped'));
   s = r.next;
@@ -123,9 +124,8 @@ test('send it ugly: after repeated skips, sort the steps, then ship with what is
 });
 
 test('send it ugly waits for repeated skips', () => {
-  let s = startSession([big], null, null, { b: 1 });
-  for (let i = 0; i < 4; i++) s = answer(s, bigMap, 'left', now).next;
-  assert.equal(s.step, 'delay');
+  const r = answer(startSession([big], null, null, { b: 1 }), bigMap, 'left', now);
+  assert.ok(r.effects.some((e) => e.type === 'snooze'), 'just put off');
 });
 
 test('numbered brain dumps split into steps', () => {
