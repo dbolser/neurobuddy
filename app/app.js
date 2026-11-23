@@ -32,6 +32,7 @@ const st = {
   lastCheck: load('lastCheck', 0),
   lastOffer: load('lastOffer', 0),
   missed: load('missed', false),     // the last check-in went unanswered
+  home: load('home', null),          // { day: 'Mon Nov 23 2026', at: minutes after midnight, done, extended }
   session: null,
   synced: 0,
   error: '',
@@ -40,13 +41,13 @@ const st = {
 function persist() {
   save('lists', st.lists); save('cards', st.cards); save('current', st.current);
   save('snoozed', st.snoozed); save('skips', st.skips); save('lastCheck', st.lastCheck); save('lastOffer', st.lastOffer);
-  save('missed', st.missed);
+  save('missed', st.missed); save('home', st.home);
 }
 
 // Another window of the app changed state: take it, rather than overwrite it later.
 window.addEventListener('storage', (e) => {
   if (!e.key || e.key.indexOf('nb.') !== 0) return;
-  ['current', 'snoozed', 'skips', 'lastCheck', 'lastOffer', 'missed'].forEach((k) => { st[k] = load(k, st[k]); });
+  ['current', 'snoozed', 'skips', 'lastCheck', 'lastOffer', 'missed', 'home'].forEach((k) => { st[k] = load(k, st[k]); });
   renderClock();
 });
 
@@ -224,6 +225,7 @@ function renderClock() {
   renderFace(now);
   $('date').textContent = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   renderTask();
+  renderHome(now);
   const b = dayBar(now, cfg.start, cfg.end);
   smoothText($('ovTime'), words(now));
   $('ovFill').style.width = (b.frac * 100).toFixed(2) + '%';
@@ -497,7 +499,45 @@ function checkin(byTap) {
 
 function workHours(d) {
   const h = d.getHours() + d.getMinutes() / 60;
-  return d.getDay() > 0 && d.getDay() < 6 && h >= cfg.start && h < cfg.end;
+  const t = homeTime(d);
+  return d.getDay() > 0 && d.getDay() < 6 && h >= cfg.start && h < cfg.end && !(t && d >= t);
+}
+
+// ---------- home time: a promise to leave at a set time, today only ----------
+const HOME_RUNWAY = 30; // minutes of countdown bar before it
+const HOME_CHOICES = [null, 17 * 60, 17.5 * 60, 18 * 60, 18.5 * 60];
+function homeTime(d) {
+  const h = st.home;
+  if (!h || h.day !== d.toDateString()) return null;
+  const t = new Date(d); t.setHours(0, h.at, 0, 0);
+  return t;
+}
+// A promise is like a train: exact. Words on the hour and half hour, digits otherwise.
+function homeWords(t) { return t.getMinutes() % 30 ? digital(t) : words(t); }
+function renderHome(now) {
+  const t = homeTime(now);
+  const left = t ? (t - now) / MIN : Infinity;
+  const on = !!t && !st.home.done && left <= HOME_RUNWAY;
+  $('home').hidden = !on;
+  if (on) {
+    smoothText($('homeText'), left > 0 ? 'home at ' + homeWords(t) : 'home time');
+    $('homeFill').style.width = (Math.max(0, left) / HOME_RUNWAY * 100).toFixed(1) + '%';
+  }
+  $('homeBtn').textContent = 'Home time: ' + (t ? homeWords(t) : 'none today') + '  (tap to change)';
+}
+// The one card that waits for an answer: it's a promise to someone.
+function homeCard() {
+  const said = homeTime(new Date());
+  said.setHours(0, st.home.said || st.home.at, 0, 0);
+  show({ mode: 'Home time', q: 'You said you\'d leave at ' + homeWords(said) + '.', title: 'Time to go home 🏠',
+    sub: st.current ? 'Your task will be here tomorrow: ' + st.current.name : '',
+    buttons: [{ id: 'go', label: 'Leaving now', cls: 'yes' }].concat(st.home.extended ? [] : [{ id: 'more', label: '10 more minutes' }]) },
+  (choice) => {
+    log({ kind: 'home', choice: choice });
+    if (choice === 'more') { st.home.said = st.home.at; st.home.at += 10; st.home.extended = true; } else st.home.done = true;
+    persist();
+    renderClock();
+  });
 }
 
 function tick() {
@@ -505,6 +545,8 @@ function tick() {
   const now = new Date();
   // Work's over: cards the app put up by itself go away.
   if (!workHours(now) && shown && shown.prompt.timeout) { hide(); st.session = null; }
+  const home = homeTime(now);
+  if (home && now >= home && !st.home.done && !shown && $('menu').hidden) return homeCard();
   if (shown || !$('menu').hidden || !cfg.token) return;
   if (!workHours(now)) return;
   if (st.current && Date.now() - st.lastCheck >= cfg.checkin * MIN) checkin();
@@ -561,7 +603,15 @@ $('menu').addEventListener('click', (e) => {
   const act = e.target.getAttribute('data-act');
   if (!act) return;
   $('menu').hidden = true;
-  if (act === 'face') {
+  if (act === 'home') { // cycle: none, 5, half 5, 6, half 6
+    const t = homeTime(new Date());
+    const cur = t ? st.home.at : null;
+    const next = HOME_CHOICES[(HOME_CHOICES.indexOf(cur) + 1) % HOME_CHOICES.length];
+    st.home = next === null ? null : { day: new Date().toDateString(), at: next };
+    persist();
+    renderClock();
+    $('menu').hidden = false; // stay open so you can tap again
+  } else if (act === 'face') {
     cfg.face = FACES[(FACES.indexOf(faceParts(cfg.face).face) + 1) % FACES.length];
     save('cfg', cfg);
     renderClock();

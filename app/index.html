@@ -18,6 +18,12 @@
     <div id="status"></div>
   </main>
 
+  <!-- Home time coming up: a bar that drains over the last half hour. -->
+  <div id="home" hidden>
+    <div id="homeText"></div>
+    <div class="mini"><div id="homeFill"></div></div>
+  </div>
+
   <!-- The task you're on. Swipe right: done. Left: something else. Bar: time to the next check-in. -->
   <div id="task" hidden>
     <div id="taskName"></div>
@@ -26,6 +32,7 @@
 
   <div id="menu" class="sheet" hidden>
     <button data-act="face" id="faceBtn">Clock style</button>
+    <button data-act="home" id="homeBtn">Home time</button>
     <button data-act="pick">Pick a task now</button>
     <button data-act="checkin">Check in now</button>
     <button data-act="clear">Clear current task</button>

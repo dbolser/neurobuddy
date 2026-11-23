@@ -39,6 +39,10 @@ button { font: inherit; }
 #task.lean-left #taskName { color: var(--dim); }
 #task.late #taskFill { background: #c9a227; }
 #status.bad { color: var(--danger); }
+/* Home time runway, top of the screen */
+#home { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: min(60vw, 520px); text-align: center; }
+#homeText { font-size: 18px; color: #c9c4bd; margin-bottom: 6px; }
+#home #homeFill { background: #e0a84f; }
 @media (orientation: landscape) {
   #time { font-size: min(22vw, 46vh); }
   #date { font-size: min(3.5vw, 7vh); margin-top: 1vh; }
