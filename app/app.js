@@ -65,13 +65,37 @@ function trello(method, path, params) {
   });
 }
 
+// Writes whose answer we don't need (done, comments, deadlines) go through the
+// outbox: if the phone is offline they wait, and are sent before the next sync,
+// so the board never comes back with something you already finished.
+const outbox = load('outbox', []);
+function send(method, path, params) {
+  outbox.push({ method: method, path: path, params: params || {} });
+  save('outbox', outbox);
+  return flush().catch(() => { st.error = 'offline'; renderClock(); });
+}
+let flushing = null;
+function flush() {
+  if (flushing) return flushing;
+  const next = () => {
+    if (!outbox.length) return Promise.resolve();
+    const w = outbox[0];
+    return trello(w.method, w.path, w.params).catch((e) => {
+      if (!/→ 4\d\d$/.test(e.message)) throw e; // offline or server trouble: keep it for later
+      console.warn('dropped', e); // Trello refused it (e.g. card deleted): don't retry forever
+    }).then(() => { outbox.shift(); save('outbox', outbox); return next(); });
+  };
+  flushing = next().then(() => { flushing = null; }, (e) => { flushing = null; throw e; });
+  return flushing;
+}
+
 function refresh() {
-  return Promise.all([
+  return flush().then(() => Promise.all([
     trello('GET', '/boards/' + cfg.board + '/lists', { fields: 'name' }),
     trello('GET', '/boards/' + cfg.board + '/cards', {
       fields: 'name,idList,due,dueComplete,pos', checklists: 'all',
       checklist_fields: 'name,pos', checkItem_fields: 'name,state,pos' }),
-  ]).then((r) => {
+  ])).then((r) => {
     const byName = {};
     r[0].forEach((l) => { byName[l.name.trim().toLowerCase()] = l.id; });
     st.lists = { today: byName['today'], week: byName['this week'], later: byName['later'], done: byName['done'] };
@@ -110,7 +134,7 @@ function run(effects) {
       st.current = { cardId: e.cardId, itemId: e.itemId, name: e.name, cardName: e.cardName, since: Date.now() };
       st.lastCheck = Date.now();
     } else if (e.type === 'comment') {
-      writes.push(trello('POST', '/cards/' + e.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: ' + e.text }));
+      writes.push(send('POST', '/cards/' + e.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: ' + e.text }));
     } else if (e.type === 'snooze') {
       st.snoozed[e.cardId] = e.until || +startOfDay(Date.now() + DAY);
     } else if (e.type === 'skipped') {
@@ -121,7 +145,9 @@ function run(effects) {
       writes.push(moveToLater(e.cardId, e.itemId).then(() =>
         trello('POST', '/cards/' + e.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: Can follow later: ' + e.name })));
     } else if (e.type === 'setDue') {
-      writes.push(trello('PUT', '/cards/' + e.cardId, { due: e.due }));
+      const card = byId()[e.cardId];
+      if (card) card.due = e.due;
+      writes.push(send('PUT', '/cards/' + e.cardId, { due: e.due }));
     } else if (e.type === 'askStep') {
       askSteps(e.cardId, e.cardName, true);
     } else if (e.type === 'resume') {
@@ -158,13 +184,15 @@ function moveToLater(cardId, itemId) {
 function completeCurrent() {
   const c = st.current;
   st.current = null;
+  // Done counts on the phone straight away, online or not.
+  const card = byId()[c.cardId];
+  if (card && c.itemId) (card.checklists || []).forEach((cl) => cl.checkItems.forEach((i) => { if (i.id === c.itemId) i.state = 'complete'; }));
+  else if (card) { card.idList = st.lists.done; card.dueComplete = true; }
   persist();
-  const done = c.itemId
-    ? trello('PUT', '/cards/' + c.cardId + '/checkItem/' + c.itemId, { state: 'complete' })
-    : trello('PUT', '/cards/' + c.cardId, { idList: st.lists.done, dueComplete: 'true' });
-  return done
-    .then(() => trello('POST', '/cards/' + c.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: Done: ' + c.name }))
-    .then(refresh, (e) => { st.error = 'write failed'; console.warn(e); });
+  if (c.itemId) send('PUT', '/cards/' + c.cardId + '/checkItem/' + c.itemId, { state: 'complete' });
+  else send('PUT', '/cards/' + c.cardId, { idList: st.lists.done, dueComplete: 'true' });
+  send('POST', '/cards/' + c.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: Done: ' + c.name });
+  return Promise.resolve();
 }
 
 // Add steps (in order) to the top of the card's main checklist, then start the
@@ -329,11 +357,13 @@ function attachSwipe(el, canStart, onSwipe, area) {
   let x0 = null, dx = 0;
   area.addEventListener('pointerdown', (e) => {
     if (!canStart() || e.target.tagName === 'INPUT') return;
-    x0 = e.clientX; dx = 0; el.classList.remove('snap'); area.setPointerCapture(e.pointerId);
+    x0 = e.clientX; dx = 0; el.classList.remove('snap');
   });
   area.addEventListener('pointermove', (e) => {
     if (x0 === null) return;
     dx = e.clientX - x0;
+    // Capture only once it's really a drag, so a plain tap still clicks what's under it.
+    if (Math.abs(dx) > 10 && !area.hasPointerCapture(e.pointerId)) area.setPointerCapture(e.pointerId);
     el.style.transform = 'translateX(' + dx + 'px) rotate(' + dx / 25 + 'deg)';
     el.classList.toggle('lean-right', dx > 40);
     el.classList.toggle('lean-left', dx < -40);
@@ -371,10 +401,10 @@ function nextPrompt() {
   if (!s) return;
   const map = byId();
   const prompt = promptFor(s, map, new Date());
-  prompt.mode = s.quick ? (s.step === 'back' ? 'Your task' : 'Something else? · ' + (s.ci + 1) + ' of ' + s.order.length)
-    : s.step === 'empty' ? 'Choosing a task'
+  // No "card 1 of 19": a count of what's left feels like a pile.
+  prompt.mode = s.quick ? (s.step === 'back' ? 'Your task' : 'Something else?')
     : s.step === 'breakdown' ? 'Breaking it down'
-    : (/sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task') + ' · card ' + (s.ci + 1) + ' of ' + s.order.length;
+    : /sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task';
   prompt.busy = s.step !== 'empty' && !s.quick;
   if (s.auto) { // nobody asked: back to the clock if it's ignored
     prompt.timeout = CHECKIN_SHOWN * MIN;
