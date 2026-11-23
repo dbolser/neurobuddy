@@ -317,9 +317,12 @@ function show(prompt, onAnswer) {
   const box = $('buttons');
   box.innerHTML = '';
   const btns = prompt.buttons || [{ id: 'left', label: prompt.left }, { id: 'right', label: prompt.right, cls: prompt.danger ? 'danger' : 'yes' }];
+  const sw = prompt.swipe || {};
   btns.forEach((b) => {
     const el = document.createElement('button');
-    el.textContent = b.label;
+    // Arrows show which button a swipe picks (unless the label already says).
+    el.textContent = /[←→]/.test(b.label) ? b.label
+      : (sw.left === b.id ? '← ' : '') + b.label + (sw.right === b.id ? ' →' : '');
     if (b.cls) el.className = b.cls;
     el.onclick = () => choose(b.id);
     box.appendChild(el);
@@ -384,7 +387,9 @@ function attachSwipe(el, canStart, onSwipe, area) {
   area.addEventListener('pointerup', end);
   area.addEventListener('pointercancel', end);
 }
-attachSwipe($('card'), () => !!(shown && shown.prompt.left), choose);
+// Every card swipes, anywhere on the screen: left = leave me alone, right = done / yes.
+attachSwipe($('card'), () => !!(shown && (shown.prompt.left || shown.prompt.swipe)),
+  (dir) => shown && choose(shown.prompt.swipe ? shown.prompt.swipe[dir] : dir), $('overlay'));
 
 // ---------- sessions & check-ins ----------
 // auto: offered by the app itself (not asked for), so its cards go away if ignored.
@@ -433,7 +438,8 @@ function askSteps(cardId, cardName, startFirst) {
   typed = [];
   const prompt = { mode: startFirst ? 'Breaking it down' : 'Adding steps', title: cardName, input: true,
     q: startFirst ? 'Smallest next step? Then any more.' : 'Brain dump: one step at a time, "Go" after each.',
-    buttons: [{ id: 'cancel', label: 'Never mind' }, { id: 'save', label: startFirst ? 'Save and start the first' : 'Save steps', cls: 'yes' }] };
+    buttons: [{ id: 'cancel', label: 'Never mind' }, { id: 'save', label: startFirst ? 'Save and start the first' : 'Save steps', cls: 'yes' }],
+    swipe: { left: 'cancel', right: 'save' } };
   show(prompt, (choice) => {
     const last = $('stepInput').value.trim();
     $('stepInput').value = '';
@@ -469,10 +475,11 @@ function checkin(byTap) {
   const prompt = missed
     ? { mode: 'Check-in', q: 'Missed the last check-in. How come?', title: c.name, sub: sub,
       buttons: [{ id: 'focused', label: 'Hyper-focused', cls: 'yes' }, { id: 'distracted', label: 'Distracted' },
-        { id: 'stuck', label: 'Stuck' }, { id: 'done', label: 'Done ✓' }] }
+        { id: 'stuck', label: 'Stuck' }, { id: 'done', label: 'Done ✓' }], swipe: { left: 'still', right: 'done' } }
     : { mode: byTap ? 'Your task' : 'Check-in', q: 'Still on this? (' + mins + ' min)', title: c.name, sub: sub,
       buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
-        { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }] };
+        { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }],
+      swipe: { left: 'still', right: 'done' } };
   if (!byTap) {
     prompt.timeout = CHECKIN_SHOWN * MIN;
     prompt.onTimeout = () => { st.missed = true; persist(); log({ kind: 'checkin', cardId: c.cardId, choice: 'missed', mins: mins }); };
@@ -531,7 +538,8 @@ function homeCard() {
   said.setHours(0, st.home.said || st.home.at, 0, 0);
   show({ mode: 'Home time', q: 'You said you\'d leave at ' + homeWords(said) + '.', title: 'Time to go home 🏠',
     sub: st.current ? 'Your task will be here tomorrow: ' + st.current.name : '',
-    buttons: [{ id: 'go', label: 'Leaving now', cls: 'yes' }].concat(st.home.extended ? [] : [{ id: 'more', label: '10 more minutes' }]) },
+    buttons: [{ id: 'go', label: 'Leaving now', cls: 'yes' }].concat(st.home.extended ? [] : [{ id: 'more', label: '10 more minutes' }]),
+    swipe: { left: st.home.extended ? 'go' : 'more', right: 'go' } },
   (choice) => {
     log({ kind: 'home', choice: choice });
     if (choice === 'more') { st.home.said = st.home.at; st.home.at += 10; st.home.extended = true; } else st.home.done = true;

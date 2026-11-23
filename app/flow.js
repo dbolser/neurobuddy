@@ -154,16 +154,17 @@ function putOff(s, card, how, now, fx) {
   return { next: card.due && how === 'tomorrow' ? nextCard(s) : with_(s, { step: 'setdue' }), effects: fx };
 }
 
-// What to show. left/right label the swipe directions; `buttons` means pick one.
+// What to show. left/right label the swipe directions; `buttons` means pick one,
+// and `swipe` says which button each swipe direction picks. Every card swipes.
 export function promptFor(s, byId, now) {
   if (s.step === 'back') {
     return { q: 'None of those. Back to this?', title: s.backName,
       buttons: [{ id: 'keep', label: 'Keep going', cls: 'yes' }, { id: 'steps', label: 'Break it down' },
-        { id: 'putoff', label: 'Put it off' }] };
+        { id: 'putoff', label: 'Put it off' }], swipe: { left: 'putoff', right: 'keep' } };
   }
   if (s.step === 'empty') {
     return { title: 'Nothing picked', sub: "That's fine. Take a proper break — I'll ask again later.",
-      buttons: [{ id: 'ok', label: 'OK' }] };
+      buttons: [{ id: 'ok', label: 'OK' }], swipe: { left: 'ok', right: 'ok' } };
   }
   const card = byId[s.order[s.ci]];
   if (s.step === 'hurdle') {
@@ -202,7 +203,8 @@ export function promptFor(s, byId, now) {
     return { q: card.due ? 'New deadline?' : 'Give it a deadline?', title: card.name,
       sub: card.due ? 'Was ' + dueText(card, now) : '',
       buttons: [{ id: 'tomorrow', label: nextWorkdayName(now) }, { id: 'friday', label: 'Friday' },
-        { id: 'nextweek', label: 'Next week' }, { id: 'none', label: 'No deadline' }] };
+        { id: 'nextweek', label: 'Next week' }, { id: 'none', label: 'No deadline' }],
+      swipe: { left: 'tomorrow', right: 'tomorrow' } };
   }
   if (s.step === 'breakdown') {
     return { q: 'Break it down?', title: card.name, sub: "What's the smallest next step?",
