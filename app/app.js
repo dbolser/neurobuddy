@@ -81,7 +81,7 @@ function flush() {
   const next = () => {
     if (!outbox.length) return Promise.resolve();
     const w = outbox[0];
-    return trello(w.method, w.path, w.params).catch((e) => {
+    return (w.op === 'steps' ? sendSteps(w) : trello(w.method, w.path, w.params)).catch((e) => {
       if (!/→ 4\d\d$/.test(e.message)) throw e; // offline or server trouble: keep it for later
       console.warn('dropped', e); // Trello refused it (e.g. card deleted): don't retry forever
     }).then(() => { outbox.shift(); save('outbox', outbox); return next(); });
@@ -198,24 +198,61 @@ function completeCurrent() {
 
 // Add steps (in order) to the top of the card's main checklist, then start the
 // first one if asked to (or if you were on the whole card, not a step of it).
+// They show on the phone at once with stand-in ids, and go to Trello through the
+// outbox, so typing them offline is never wasted.
 function addSteps(cardId, cardName, texts, startFirst) {
   const card = byId()[cardId];
-  const cl = card && (card.checklists || []).filter((l) => !/^later/i.test(l.name || ''))[0];
-  let chain = cl ? Promise.resolve(cl) : trello('POST', '/cards/' + cardId + '/checklists', { name: 'Steps' });
-  const items = [];
+  const tag = 'tmp' + Date.now() + '-';
+  const items = texts.map((t, i) => ({ id: tag + i, name: t, state: 'incomplete', pos: -1e9 + i }));
+  if (card) {
+    card.checklists = card.checklists || [];
+    let cl = mainChecklist(card);
+    if (!cl) { cl = { id: tag + 'list', name: 'Steps', checkItems: [] }; card.checklists.unshift(cl); }
+    cl.checkItems = items.concat(cl.checkItems);
+  }
   // Last first, each to the top, so they end up in the order typed.
-  texts.slice().reverse().forEach((t) => {
-    chain = chain.then((l) => trello('POST', '/checklists/' + l.id + '/checkItems', { name: t, pos: 'top' })
-      .then((item) => { items.unshift(item); return l; }));
+  outbox.push({ op: 'steps', cardId: cardId, todo: items.slice().reverse().map((x) => ({ tmp: x.id, name: x.name })) });
+  save('outbox', outbox);
+  const fx = [{ type: 'comment', cardId: cardId, text: 'Added steps: ' + texts.join('; ') }];
+  const c = st.current;
+  if (startFirst || (c && c.cardId === cardId && !c.itemId)) {
+    fx.push({ type: 'start', cardId: cardId, itemId: items[0].id, name: texts[0], cardName: cardName });
+  }
+  run(fx);
+}
+
+function mainChecklist(card) {
+  return (card.checklists || []).filter((l) => !/^later/i.test(l.name || '') && !/^tmp/.test(l.id))[0];
+}
+
+// One outbox entry of typed steps: send them one at a time, saving progress after
+// each, so a dropped connection never posts a step twice.
+function sendSteps(w) {
+  const card = byId()[w.cardId];
+  const have = w.list || (card && mainChecklist(card) || {}).id;
+  const list = have ? Promise.resolve(have)
+    : trello('POST', '/cards/' + w.cardId + '/checklists', { name: 'Steps' }).then((l) => l.id);
+  return list.then((id) => {
+    w.list = id; save('outbox', outbox);
+    const next = () => {
+      if (!w.todo.length) return Promise.resolve();
+      const x = w.todo[0];
+      return trello('POST', '/checklists/' + id + '/checkItems', { name: x.name, pos: 'top' }).then((item) => {
+        w.todo.shift();
+        realId(x.tmp, item.id);
+        return next();
+      });
+    };
+    return next();
   });
-  return chain.then(() => {
-    const fx = [{ type: 'comment', cardId: cardId, text: 'Added steps: ' + texts.join('; ') }];
-    const c = st.current;
-    if (startFirst || (c && c.cardId === cardId && !c.itemId)) {
-      fx.push({ type: 'start', cardId: cardId, itemId: items[0].id, name: texts[0], cardName: cardName });
-    }
-    run(fx);
-  });
+}
+
+// A step reached Trello: swap its stand-in id everywhere it is used.
+function realId(tmp, id) {
+  if (st.current && st.current.itemId === tmp) st.current.itemId = id;
+  outbox.forEach((w) => { if (w.path) w.path = w.path.split(tmp).join(id); });
+  save('outbox', outbox);
+  persist();
 }
 
 // ---------- clock ----------
@@ -447,7 +484,7 @@ function askSteps(cardId, cardName, startFirst) {
     const texts = [].concat.apply([], typed.map(splitSteps));
     typed = null;
     log({ kind: 'steps', cardId: cardId, choice: choice, texts: texts });
-    if (choice === 'save' && texts.length) addSteps(cardId, cardName, texts, startFirst).catch((e) => { st.error = 'write failed'; console.warn(e); renderClock(); });
+    if (choice === 'save' && texts.length) addSteps(cardId, cardName, texts, startFirst);
     else st.lastOffer = Date.now();
   });
 }
@@ -587,6 +624,7 @@ function keepAwake() {
   navigator.wakeLock.request('screen').then((l) => { lock = l; l.addEventListener('release', () => { lock = null; }); }, () => {});
 }
 document.addEventListener('visibilitychange', () => { keepAwake(); if (document.visibilityState === 'visible') refresh(); });
+window.addEventListener('online', refresh); // wifi back: send what waited
 
 // ---------- the task strip: swipe right = done, left = something else, tap = check in ----------
 // Swipe anywhere on the clock screen; the task strip is what moves.
