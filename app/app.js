@@ -2,7 +2,7 @@
 // Chrome 87 target (Galaxy A20e): no top-level await, no Array.at.
 import { smoothText } from './smooth.js';
 import { FACES, faceParts, faceName, digital, words, dayBar } from './clock.js';
-import { orderCards, startSession, startSwitch, promptFor, answer, startOfDay, DAY, LATER, splitSteps } from './flow.js';
+import { orderCards, startSession, startSwitch, promptFor, answer, startOfDay, DAY, LATER, splitSteps, dealDeck, narrow, dueText } from './flow.js';
 
 const API = 'https://api.trello.com/1';
 const MIN = 60e3;
@@ -27,6 +27,8 @@ const st = {
   lists: load('lists', {}),        // { today, week, later, done } -> list id
   cards: load('cards', []),
   current: load('current', null),  // { cardId, itemId, name, cardName, since }
+  stack: load('stack', null),      // the task put aside by a swipe-up deal; swipe down swaps back
+  recent: load('recent', []),      // [{ cardId, t }] tasks started, latest first
   snoozed: load('snoozed', {}),    // cardId -> ms
   skips: load('skips', {}),        // cardId -> times every step was turned down
   lastCheck: load('lastCheck', 0),
@@ -39,7 +41,7 @@ const st = {
 };
 
 function persist() {
-  save('lists', st.lists); save('cards', st.cards); save('current', st.current);
+  save('lists', st.lists); save('cards', st.cards); save('current', st.current); save('stack', st.stack); save('recent', st.recent);
   save('snoozed', st.snoozed); save('skips', st.skips); save('lastCheck', st.lastCheck); save('lastOffer', st.lastOffer);
   save('missed', st.missed); save('home', st.home);
 }
@@ -47,7 +49,7 @@ function persist() {
 // Another window of the app changed state: take it, rather than overwrite it later.
 window.addEventListener('storage', (e) => {
   if (!e.key || e.key.indexOf('nb.') !== 0) return;
-  ['current', 'snoozed', 'skips', 'lastCheck', 'lastOffer', 'missed', 'home'].forEach((k) => { st[k] = load(k, st[k]); });
+  ['current', 'stack', 'recent', 'snoozed', 'skips', 'lastCheck', 'lastOffer', 'missed', 'home'].forEach((k) => { st[k] = load(k, st[k]); });
   renderClock();
 });
 
@@ -109,14 +111,19 @@ function refresh() {
   }).catch((e) => { st.error = 'offline'; console.warn(e); renderClock(); });
 }
 
-// Current task finished or deleted elsewhere (e.g. in Trello on the laptop)?
+// Current (or stacked) task finished or deleted elsewhere (e.g. in Trello on the laptop)?
+// And a whole-card task that has steps now becomes its first step.
 function dropStaleCurrent() {
-  const c = st.current;
-  if (!c) return;
-  const card = byId()[c.cardId];
-  const gone = !card || card.idList === st.lists.done || card.dueComplete ||
-    (c.itemId && !(card.checklists || []).some((cl) => cl.checkItems.some((i) => i.id === c.itemId && i.state !== 'complete')));
-  if (gone) st.current = null;
+  const m = byId();
+  const gone = (c) => {
+    const card = m[c.cardId];
+    return !card || card.idList === st.lists.done || card.dueComplete ||
+      (c.itemId && !(card.checklists || []).some((cl) => cl.checkItems.some((i) => i.id === c.itemId && i.state !== 'complete')));
+  };
+  if (st.current && gone(st.current)) st.current = null;
+  if (st.stack && gone(st.stack)) st.stack = null;
+  if (st.current) st.current = narrow(st.current, m[st.current.cardId]);
+  if (st.stack) st.stack = narrow(st.stack, m[st.stack.cardId]);
 }
 
 function byId() {
@@ -134,6 +141,7 @@ function run(effects) {
     if (e.type === 'start') {
       st.current = { cardId: e.cardId, itemId: e.itemId, name: e.name, cardName: e.cardName, since: Date.now() };
       st.lastCheck = Date.now();
+      st.recent = [{ cardId: e.cardId, t: Date.now() }].concat(st.recent.filter((r) => r.cardId !== e.cardId)).slice(0, 20);
     } else if (e.type === 'comment') {
       writes.push(send('POST', '/cards/' + e.cardId + '/actions/comments', { text: '🧠 NeuroBuddy: ' + e.text }));
     } else if (e.type === 'snooze') {
@@ -249,7 +257,7 @@ function sendSteps(w) {
 
 // A step reached Trello: swap its stand-in id everywhere it is used.
 function realId(tmp, id) {
-  if (st.current && st.current.itemId === tmp) st.current.itemId = id;
+  [st.current, st.stack].forEach((c) => { if (c && c.itemId === tmp) c.itemId = id; });
   outbox.forEach((w) => { if (w.path) w.path = w.path.split(tmp).join(id); });
   save('outbox', outbox);
   persist();
@@ -280,9 +288,14 @@ function renderClock() {
 // The task strip: what you're on, and a bar that fills up to the next check-in.
 function renderTask() {
   const c = st.current;
-  $('task').hidden = !c;
-  if (c) document.body.setAttribute('data-task', '');
-  else { document.body.removeAttribute('data-task'); return; }
+  const k = st.stack;
+  $('task').hidden = !c && !k;
+  $('stack').hidden = !k;
+  if (k) $('stack').textContent = (c ? 'also on: ' : 'swipe down for: ') + k.name;
+  $('taskName').hidden = $('taskBar').hidden = !c;
+  if (c || k) document.body.setAttribute('data-task', '');
+  else document.body.removeAttribute('data-task');
+  if (!c) return;
   const name = $('taskName');
   name.textContent = c.name;
   if (c.cardName && c.cardName !== c.name) {
@@ -391,42 +404,115 @@ function choose(id) {
   s.onAnswer(id);
 }
 
-// Swipe: drag past ~1/4 screen width to answer. Used on cards and the task strip.
+// Swipe: drag past ~1/4 screen width (or ~1/6 height) to answer. Used on cards and the task strip.
 let swiped = 0; // time of the last swipe, so its pointerup doesn't also count as a tap
 // `area` takes the touches; `el` is what moves (they differ for the task strip).
-function attachSwipe(el, canStart, onSwipe, area) {
+// canGo(dir) says whether 'up' / 'down' mean anything right now (left and right always do).
+function attachSwipe(el, canStart, onSwipe, area, canGo) {
   area = area || el;
-  let x0 = null, dx = 0;
+  let x0 = null, y0 = 0, dx = 0, dy = 0;
+  const vert = () => Math.abs(dy) > Math.abs(dx) && canGo && canGo(dy < 0 ? 'up' : 'down');
   area.addEventListener('pointerdown', (e) => {
     if (!canStart() || e.target.tagName === 'INPUT') return;
-    x0 = e.clientX; dx = 0; el.classList.remove('snap');
+    x0 = e.clientX; y0 = e.clientY; dx = dy = 0; el.classList.remove('snap');
   });
   area.addEventListener('pointermove', (e) => {
     if (x0 === null) return;
-    dx = e.clientX - x0;
+    dx = e.clientX - x0; dy = e.clientY - y0;
     // Capture only once it's really a drag, so a plain tap still clicks what's under it.
-    if (Math.abs(dx) > 10 && !area.hasPointerCapture(e.pointerId)) area.setPointerCapture(e.pointerId);
-    el.style.transform = 'translateX(' + dx + 'px) rotate(' + dx / 25 + 'deg)';
-    el.classList.toggle('lean-right', dx > 40);
-    el.classList.toggle('lean-left', dx < -40);
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > 10 && !area.hasPointerCapture(e.pointerId)) area.setPointerCapture(e.pointerId);
+    const v = vert();
+    el.style.transform = v ? 'translateY(' + dy + 'px)' : 'translateX(' + dx + 'px) rotate(' + dx / 25 + 'deg)';
+    el.classList.toggle('lean-right', !v && dx > 40);
+    el.classList.toggle('lean-left', !v && dx < -40);
+    el.classList.toggle('lean-up', v && dy < -40);
   });
   const end = () => {
     if (x0 === null) return;
     x0 = null;
     el.classList.add('snap');
-    el.classList.remove('lean-right', 'lean-left');
-    if (Math.abs(dx) > 10) swiped = Date.now();
-    if (Math.abs(dx) > window.innerWidth / 4) {
-      el.style.transform = 'translateX(' + (dx > 0 ? 1 : -1) * window.innerWidth + 'px)';
-      setTimeout(() => { onSwipe(dx > 0 ? 'right' : 'left'); el.style.transform = ''; }, 180);
-    } else el.style.transform = '';
+    el.classList.remove('lean-right', 'lean-left', 'lean-up');
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > 10) swiped = Date.now();
+    const go = (dir, transform) => {
+      el.style.transform = transform;
+      setTimeout(() => { onSwipe(dir); el.style.transform = ''; }, 180);
+    };
+    if (vert() && Math.abs(dy) > window.innerHeight / 6) go(dy < 0 ? 'up' : 'down', 'translateY(' + (dy < 0 ? -1 : 1) * window.innerHeight + 'px)');
+    else if (!vert() && Math.abs(dx) > window.innerWidth / 4) go(dx > 0 ? 'right' : 'left', 'translateX(' + (dx > 0 ? 1 : -1) * window.innerWidth + 'px)');
+    else el.style.transform = '';
   };
   area.addEventListener('pointerup', end);
   area.addEventListener('pointercancel', end);
 }
-// Every card swipes, anywhere on the screen: left = leave me alone, right = done / yes.
+// Every card swipes, anywhere on the screen: left = leave me alone, right = done / yes, up = deal another.
+const swipeChoice = (p, dir) => (p.swipe ? p.swipe[dir] : (dir === 'up' ? (p.up ? 'up' : null) : dir));
 attachSwipe($('card'), () => !!(shown && (shown.prompt.left || shown.prompt.swipe)),
-  (dir) => shown && choose(shown.prompt.swipe ? shown.prompt.swipe[dir] : dir), $('overlay'));
+  (dir) => shown && choose(swipeChoice(shown.prompt, dir)), $('overlay'),
+  (dir) => !!(shown && swipeChoice(shown.prompt, dir)));
+
+// ---------- swipe up: deal another thing to do ----------
+// Other steps of this task first, then today's tasks, then the rest. Now and then,
+// just for fun, a wildcard from further down the deck, or three at once.
+let deck = null; // { list, at }
+function deal(fresh) {
+  if (fresh || !deck) {
+    const today = +startOfDay(Date.now());
+    deck = { list: dealDeck(orderCards(st.cards, priorityLists(), new Date(), st.snoozed), byId(), st.current,
+      st.recent.filter((r) => r.t >= today).map((r) => r.cardId), st.stack), at: 0 };
+  }
+  const list = deck.list;
+  const n = list.length;
+  log({ kind: 'deal', at: deck.at });
+  if (!n) {
+    return show({ mode: 'Juggle', title: 'Nothing else to deal', sub: 'Everything else is done or put off.',
+      buttons: [{ id: 'ok', label: 'OK' }], swipe: { left: 'ok', right: 'ok' } }, () => {});
+  }
+  const r = Math.random();
+  if (r < 1 / 8 && n >= 3) return fan([0, 1, 2].map(() => list[deck.at++ % n]));
+  let wild = false;
+  if (r < 2 / 8 && n >= 4) { // swap in something from further down
+    const a = deck.at % n, b = (deck.at + 3 + Math.floor(Math.random() * (n - 3))) % n;
+    const t = list[a]; list[a] = list[b]; list[b] = t;
+    wild = true;
+  }
+  const e = list[deck.at++ % n];
+  const c = st.current;
+  const card = byId()[e.cardId];
+  show({ mode: 'Juggle',
+    q: wild ? '🎲 Something different?' : c && c.cardId === e.cardId ? 'Another step of this?' : 'This instead?',
+    title: e.name, sub: (e.itemId ? e.cardName + ' · ' : '') + (card ? dueText(card, new Date()) : ''),
+    buttons: [{ id: 'take', label: 'Do it', cls: 'yes' }, { id: 'up', label: '↑ Another' }, { id: 'close', label: 'Back' }],
+    swipe: { left: 'close', right: 'take', up: 'up' } },
+  (choice) => dealt(choice, e));
+}
+function fan(es) {
+  show({ mode: 'Juggle', q: '🎲 Three at once', title: 'Pick one',
+    buttons: es.map((e, i) => ({ id: 'take' + i, label: e.name, cls: i ? 'pick' : 'pick yes' }))
+      .concat([{ id: 'up', label: '↑ More' }, { id: 'close', label: 'Back' }]),
+    swipe: { left: 'close', right: 'take0', up: 'up' } },
+  (choice) => dealt(choice.indexOf('take') === 0 ? 'take' : choice, es[+choice.slice(4)]));
+}
+function dealt(choice, e) {
+  log({ kind: 'dealt', cardId: e && e.cardId, itemId: e && e.itemId, choice: choice });
+  if (choice === 'up') return deal();
+  deck = null;
+  if (choice !== 'take') return;
+  // Take it: what you were on waits underneath (swipe down to swap back).
+  const old = st.current;
+  if (old && !(old.cardId === e.cardId && old.itemId === e.itemId)) st.stack = old;
+  const fx = [{ type: 'start', cardId: e.cardId, itemId: e.itemId, name: e.name, cardName: e.cardName },
+    { type: 'comment', cardId: e.cardId, text: 'Juggled to: ' + e.name }];
+  run(fx);
+}
+function swapStack() {
+  const k = st.stack;
+  st.stack = st.current;
+  st.current = k && Object.assign({}, k, { since: Date.now() }); // check-ins count from the swap
+  st.lastCheck = Date.now();
+  log({ kind: 'swap', cardId: k && k.cardId, itemId: k && k.itemId });
+  persist();
+  renderClock();
+}
 
 // ---------- sessions & check-ins ----------
 // auto: offered by the app itself (not asked for), so its cards go away if ignored.
@@ -456,6 +542,7 @@ function nextPrompt() {
   }
   show(prompt, (choice) => {
     log({ kind: 'session', step: s.step, cardId: s.order[s.ci], choice: choice });
+    if (choice === 'up') { st.session = null; persist(); return deal(true); }
     if (choice === 'busy') { // already busy with something: no more cards for a while
       st.session = null;
       st.lastOffer = Date.now() + BUSY * MIN;
@@ -512,11 +599,11 @@ function checkin(byTap) {
   const prompt = missed
     ? { mode: 'Check-in', q: 'Missed the last check-in. How come?', title: c.name, sub: sub,
       buttons: [{ id: 'focused', label: 'Hyper-focused', cls: 'yes' }, { id: 'distracted', label: 'Distracted' },
-        { id: 'stuck', label: 'Stuck' }, { id: 'done', label: 'Done ✓' }], swipe: { left: 'still', right: 'done' } }
+        { id: 'stuck', label: 'Stuck' }, { id: 'done', label: 'Done ✓' }], swipe: { left: 'still', right: 'done', up: 'up' } }
     : { mode: byTap ? 'Your task' : 'Check-in', q: 'Still on this? (' + mins + ' min)', title: c.name, sub: sub,
       buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
         { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }],
-      swipe: { left: 'still', right: 'done' } };
+      swipe: { left: 'still', right: 'done', up: 'up' } };
   if (!byTap) {
     prompt.timeout = CHECKIN_SHOWN * MIN;
     prompt.onTimeout = () => { st.missed = true; persist(); log({ kind: 'checkin', cardId: c.cardId, choice: 'missed', mins: mins }); };
@@ -525,7 +612,8 @@ function checkin(byTap) {
     log({ kind: 'checkin', cardId: c.cardId, itemId: c.itemId, choice: choice, mins: mins });
     st.missed = false;
     persist();
-    if (choice === 'focused' || choice === 'distracted') {
+    if (choice === 'up') deal(true);
+    else if (choice === 'focused' || choice === 'distracted') {
       run([{ type: 'comment', cardId: c.cardId, text: (choice === 'focused' ? 'Hyper-focused on: ' : 'Got distracted from: ') + c.name + ' (' + mins + ' min in)' }]);
     } else if (choice === 'done') completeCurrent().then(() => pickTask(c.cardId));
     else if (choice === 'steps') askSteps(c.cardId, c.cardName || c.name, false);
@@ -544,7 +632,7 @@ function checkin(byTap) {
 function workHours(d) {
   const h = d.getHours() + d.getMinutes() / 60;
   const t = homeTime(d);
-  return d.getDay() > 0 && d.getDay() < 6 && h >= cfg.start && h < cfg.end && !(t && d >= t);
+  return d.getDay() > 0 && d.getDay() < 6 && h >= cfg.start && h < cfg.end && !(t && d >= t && !st.home.stay);
 }
 
 // ---------- home time: a promise to leave at a set time, today only ----------
@@ -575,13 +663,16 @@ function homeCard() {
   said.setHours(0, st.home.said || st.home.at, 0, 0);
   show({ mode: 'Home time', q: 'You said you\'d leave at ' + homeWords(said) + '.', title: 'Time to go home 🏠',
     sub: st.current ? 'Your task will be here tomorrow: ' + st.current.name : '',
-    buttons: [{ id: 'go', label: 'Leaving now', cls: 'yes' }].concat(st.home.extended ? [] : [{ id: 'more', label: '10 more minutes' }]),
-    swipe: { left: st.home.extended ? 'go' : 'more', right: 'go' } },
+    buttons: [{ id: 'go', label: 'Leaving now', cls: 'yes' }, { id: 'stay', label: 'No, keep working' }]
+      .concat(st.home.extended ? [] : [{ id: 'more', label: '10 more minutes' }]),
+    swipe: { left: 'stay', right: 'go' } },
   (choice) => {
     log({ kind: 'home', choice: choice });
     if (choice === 'more') { st.home.said = st.home.at; st.home.at += 10; st.home.extended = true; } else st.home.done = true;
+    if (choice === 'stay') st.home.stay = true; // back to work hours: tasks and check-ins carry on
     persist();
     renderClock();
+    if (choice === 'stay') { if (st.current) checkin(true); else pickTask(); }
   });
 }
 
@@ -627,13 +718,17 @@ document.addEventListener('visibilitychange', () => { keepAwake(); if (document.
 window.addEventListener('online', refresh); // wifi back: send what waited
 
 // ---------- the task strip: swipe right = done, left = something else, tap = check in ----------
+// Up = deal something else to do; down = swap with the task waiting underneath.
 // Swipe anywhere on the clock screen; the task strip is what moves.
-attachSwipe($('task'), () => !shown && !!st.current && $('menu').hidden && $('setup').hidden, (dir) => {
+attachSwipe($('task'), () => !shown && !!cfg.token && $('menu').hidden && $('setup').hidden, (dir) => {
   const c = st.current;
-  log({ kind: 'strip', cardId: c.cardId, itemId: c.itemId, choice: dir });
-  if (dir === 'right') completeCurrent().then(() => pickTask(c.cardId));
+  log({ kind: 'strip', cardId: c && c.cardId, itemId: c && c.itemId, choice: dir });
+  if (dir === 'up') deal(true);
+  else if (dir === 'down') swapStack();
+  else if (!c) return;
+  else if (dir === 'right') completeCurrent().then(() => pickTask(c.cardId));
   else switchAway();
-}, document.body);
+}, document.body, (dir) => dir === 'up' || !!st.stack);
 $('task').addEventListener('click', () => { if (!shown && Date.now() - swiped > 400) checkin(true); });
 
 function switchAway() {

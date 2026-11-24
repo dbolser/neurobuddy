@@ -24,10 +24,12 @@
     <div class="mini"><div id="homeFill"></div></div>
   </div>
 
-  <!-- The task you're on. Swipe right: done. Left: something else. Bar: time to the next check-in. -->
+  <!-- The task you're on. Swipe right: done. Left: something else. Up: deal another. Down: swap with
+       the task waiting underneath (#stack). Bar: time to the next check-in. -->
   <div id="task" hidden>
     <div id="taskName"></div>
-    <div class="mini"><div id="taskFill"></div></div>
+    <div class="mini" id="taskBar"><div id="taskFill"></div></div>
+    <div id="stack" hidden></div>
   </div>
 
   <div id="menu" class="sheet" hidden>

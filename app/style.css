@@ -10,7 +10,7 @@
   --danger: #ff6b5b;
 }
 * { box-sizing: border-box; }
-html, body { touch-action: pan-y; margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+html, body { touch-action: none; margin: 0; height: 100%; background: var(--bg); color: var(--fg);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent; user-select: none; overflow: hidden; }
 button { font: inherit; }
@@ -38,6 +38,10 @@ button { font: inherit; }
 #task.lean-right #taskName { color: var(--yes); }
 #task.lean-left #taskName { color: var(--dim); }
 #task.late #taskFill { background: #c9a227; }
+/* The task put aside by a swipe-up deal: swipe down to swap back */
+#stack { font-size: min(4vw, 4.5vh); color: var(--dim); margin-top: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#card.lean-up { border-color: var(--accent); }
 #status.bad { color: var(--danger); }
 /* Home time runway, top of the screen */
 #home { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); width: min(60vw, 520px); text-align: center; }
@@ -92,6 +96,7 @@ body[data-task] #clock { padding-bottom: 16vh; }
 #buttons button { flex: 1 1 40%; padding: 18px 10px; font-size: 19px; border-radius: 16px; border: 0;
   background: #2a2826; color: var(--fg); }
 #buttons button.yes { background: var(--yes); color: #04150a; font-weight: 600; }
+#buttons button.pick { flex-basis: 100%; }
 #buttons button.quiet { flex-basis: 100%; background: transparent; color: var(--dim); font-size: 15px; padding: 8px; }
 #buttons button.danger { background: var(--danger); color: #1a0402; font-weight: 600; }
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, splitSteps, startSwitch, LATER, DAY } from '../app/flow.js';
+import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, splitSteps, startSwitch, dealDeck, narrow, LATER, DAY } from '../app/flow.js';
 
 const now = new Date('2026-11-19T10:00:00');
 const L = { today: 'T', week: 'W', later: 'L', done: 'D' };
@@ -168,4 +168,34 @@ test('left on "when, then?": later today first, then further if already put off 
   const old = { f: +now - 2 * 86400e3 }; // put off days ago: counts afresh
   assert.equal(answer(at('f', old), map, 'left', now).effects[0].until, +now + 90 * 60e3);
   assert.equal(answer(at('f', {}), map, 'right', now).next.step, 'breakdown', 'right keeps it');
+});
+
+test('swipe up deals: other steps of this task, then today\'s tasks, then the rest', () => {
+  const ord = orderCards(cards, order, now); // p, y, w
+  const cur = { cardId: 'y', itemId: 'a', name: 'Search site' };
+  const d = dealDeck(ord, byId, cur, ['w']);
+  assert.deepEqual(d.map((e) => e.cardId + ':' + e.itemId), ['y:b', 'w:null', 'p:r']);
+  const k = dealDeck(ord, byId, cur, ['w'], { cardId: 'w', itemId: null });
+  assert.deepEqual(k.map((e) => e.cardId), ['y', 'p'], 'what is waiting underneath is not dealt again');
+  assert.deepEqual(dealDeck(ord, byId, null, ['o', 'w']).map((e) => e.cardId), ['w', 'p', 'y'], 'done cards are never dealt');
+});
+
+test('a whole-card task with steps becomes its first step', () => {
+  const c = narrow({ cardId: 'y', itemId: null, name: 'Email Yanis', since: 5 }, yanis);
+  assert.equal(c.itemId, 'a');
+  assert.equal(c.name, 'Search site');
+  assert.equal(c.since, 5);
+  const w = { cardId: 'w', itemId: null, name: 'Reply to WeWork' };
+  assert.equal(narrow(w, wework), w, 'no steps: unchanged');
+});
+
+test('"Back to this?" offers the next step when the task already has steps', () => {
+  const s = startSwitch([], { cardId: 'y', itemId: 'a', name: 'Search site' });
+  const p = promptFor(s, byId, now);
+  assert.ok(p.buttons.some((b) => b.id === 'nextstep' && /HF review/.test(b.label)));
+  const r = answer(s, byId, 'nextstep', now);
+  assert.equal(r.effects[0].type, 'start');
+  assert.equal(r.effects[0].itemId, 'b');
+  const w = promptFor(startSwitch([], { cardId: 'w', itemId: null, name: 'Reply to WeWork' }), byId, now);
+  assert.ok(w.buttons.some((b) => b.id === 'steps'), 'no steps yet: break it down');
 });

@@ -110,7 +110,43 @@ export const SWITCH_CHOICES = 3;
 export function startSwitch(order, current) {
   const ids = order.map((c) => c.id).filter((id) => id !== current.cardId).slice(0, SWITCH_CHOICES);
   return { order: ids, ci: 0, hi: 0, step: ids.length ? 'hurdle' : 'back', skips: {}, quick: true,
-    back: current.cardId, backName: current.name };
+    back: current.cardId, backItem: current.itemId || null, backName: current.name };
+}
+
+// The steps of a card still to do, other than the one you're on.
+function otherSteps(card, itemId) {
+  return card ? hurdles(card).filter((h) => h.id && h.id !== itemId) : [];
+}
+
+// Swipe up deals another thing to do. The deck: the other steps of the task you're
+// on, then tasks started today (latest first), then the rest in the usual order
+// (one entry per task: its next step). Leaves out what's already on screen.
+// order: cards on offer (orderCards); recent: card ids started today, latest first.
+export function dealDeck(order, byId, current, recent, stack) {
+  const out = [];
+  const seen = {};
+  const live = {};
+  order.forEach((c) => { live[c.id] = true; });
+  const add = (card, h) => out.push({ cardId: card.id, itemId: h.id, name: h.name, cardName: card.name });
+  if (current && byId[current.cardId]) {
+    const card = byId[current.cardId];
+    otherSteps(card, current.itemId).filter((h) => !stack || h.id !== stack.itemId).forEach((h) => add(card, h));
+    seen[card.id] = true;
+  }
+  if (stack) seen[stack.cardId] = true;
+  (recent || []).filter((id) => live[id]).concat(order.map((c) => c.id)).forEach((id) => {
+    if (seen[id] || !byId[id]) return;
+    seen[id] = true;
+    add(byId[id], hurdles(byId[id])[0]);
+  });
+  return out;
+}
+
+// A task with steps is done one step at a time: on the whole card, move to its first step.
+export function narrow(current, card) {
+  if (!current || current.itemId || !card) return current;
+  const h = hurdles(card)[0];
+  return h.id ? Object.assign({}, current, { itemId: h.id, name: h.name, cardName: card.name }) : current;
 }
 
 function nextCard(s) {
@@ -158,20 +194,23 @@ function putOff(s, card, how, now, fx) {
 // and `swipe` says which button each swipe direction picks. Every card swipes.
 export function promptFor(s, byId, now) {
   if (s.step === 'back') {
+    // Steps already there: offer the next one rather than breaking it down again.
+    const next = otherSteps(byId[s.back], s.backItem)[0];
     return { q: 'None of those. Back to this?', title: s.backName,
-      buttons: [{ id: 'keep', label: 'Keep going', cls: 'yes' }, { id: 'steps', label: 'Break it down' },
-        { id: 'putoff', label: 'Put it off' }], swipe: { left: 'putoff', right: 'keep' } };
+      buttons: [{ id: 'keep', label: 'Keep going', cls: 'yes' },
+        next ? { id: 'nextstep', label: 'Next step: ' + next.name } : { id: 'steps', label: 'Break it down' },
+        { id: 'putoff', label: 'Put it off' }], swipe: { left: 'putoff', right: 'keep', up: 'up' } };
   }
   if (s.step === 'empty') {
     return { title: 'Nothing picked', sub: "That's fine. Take a proper break — I'll ask again later.",
-      buttons: [{ id: 'ok', label: 'OK' }], swipe: { left: 'ok', right: 'ok' } };
+      buttons: [{ id: 'ok', label: 'OK' }], swipe: { left: 'ok', right: 'ok', up: 'up' } };
   }
   const card = byId[s.order[s.ci]];
   if (s.step === 'hurdle') {
     const h = hurdles(card)[s.hi];
     return { q: 'Do this now?', title: h.name,
       sub: (h.id ? card.name + ' · ' : '') + dueText(card, now),
-      urgent: isUrgent(card, now), left: 'Not now', right: 'Do it' };
+      urgent: isUrgent(card, now), left: 'Not now', right: 'Do it', up: true };
   }
   // Right (green) always moves towards doing the task. Left puts it off, and the
   // more often today, the later: later today first, then the next workday (or a
@@ -224,6 +263,12 @@ export function answer(s, byId, choice, now) {
   if (s.step === 'back') {
     if (choice === 'keep') return { next: null, effects: [{ type: 'resume' }] };
     if (choice === 'steps') return { next: null, effects: [{ type: 'addSteps', cardId: s.back }] };
+    if (choice === 'nextstep') {
+      const card = byId[s.back];
+      const h = otherSteps(card, s.backItem)[0];
+      return { next: null, effects: [{ type: 'start', cardId: card.id, itemId: h.id, name: h.name, cardName: card.name },
+        { type: 'comment', cardId: card.id, text: 'Moved on to: ' + h.name }] };
+    }
     // Put it off: stop the task, then ask when (the usual later today / tomorrow / new deadline).
     return { next: { order: [s.back], ci: 0, hi: 0, step: 'delay', skips: {}, snoozed: s.snoozed }, effects: [{ type: 'stop' }] };
   }
