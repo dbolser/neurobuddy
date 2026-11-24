@@ -1,6 +1,8 @@
 # Apps disabled on the desk phone (Galaxy A20e) with: adb shell pm disable-user --user 0 <pkg>
 # Undo one:  adb shell pm enable <pkg>
 # Undo all:  grep -v '^#' phone/disabled-packages.txt | xargs -n1 adb shell pm enable
+# Not disabled, only muted (it nagged 'Finish setting up your Galaxy A20e'; 24 Nov 2026):
+#   adb shell cmd appops set com.google.android.setupwizard POST_NOTIFICATION ignore   (undo: allow)
 # Third-party preloads
 com.facebook.appmanager
 com.facebook.katana
