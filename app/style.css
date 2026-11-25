@@ -84,8 +84,7 @@ body[data-task] #clock { padding-bottom: 16vh; }
 #mode { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
 #mode:empty { display: none; }
 #q { font-size: 20px; color: var(--dim); margin-bottom: 16px; }
-#title { font-size: 34px; font-weight: 600; line-height: 1.2;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+#title { font-size: 34px; font-weight: 600; line-height: 1.2; min-height: 0; overflow: hidden; } /* app.js shrinks it to fit */
 #sub { font-size: 18px; color: var(--dim); margin-top: 16px; }
 #card.danger #q { color: var(--danger); }
 .hint { display: none; }

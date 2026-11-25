@@ -340,6 +340,17 @@ function renderFace(now) {
 
 // ---------- card overlay ----------
 let shown = null; // { prompt, onAnswer }
+// Which button a swipe picks: from prompt.swipe, or the plain left / right buttons.
+const swipeChoice = (p, dir) => (p.swipe ? p.swipe[dir] : (dir === 'up' ? (p.up ? 'up' : null) : dir));
+
+// Long titles shrink until the whole thing fits on the card (no scrolling: a drag is a swipe).
+function fitTitle() {
+  const t = $('title');
+  t.style.fontSize = '';
+  let px = parseFloat(getComputedStyle(t).fontSize);
+  while (t.scrollHeight > t.clientHeight + 1 && px > 12) t.style.fontSize = (px -= 1) + 'px';
+}
+window.addEventListener('resize', () => { if (shown) fitTitle(); });
 let expiry = null;
 
 // prompt.timeout (ms): unanswered by then, the card goes away and onTimeout runs.
@@ -367,12 +378,11 @@ function show(prompt, onAnswer) {
   const box = $('buttons');
   box.innerHTML = '';
   const btns = prompt.buttons || [{ id: 'left', label: prompt.left }, { id: 'right', label: prompt.right, cls: prompt.danger ? 'danger' : 'yes' }];
-  const sw = prompt.swipe || {};
   btns.forEach((b) => {
     const el = document.createElement('button');
     // Arrows show which button a swipe picks (unless the label already says).
     el.textContent = /[←→]/.test(b.label) ? b.label
-      : (sw.left === b.id ? '← ' : '') + b.label + (sw.right === b.id ? ' →' : '');
+      : (swipeChoice(prompt, 'left') === b.id ? '← ' : '') + b.label + (swipeChoice(prompt, 'right') === b.id ? ' →' : '');
     if (b.cls) el.className = b.cls;
     el.onclick = () => choose(b.id);
     box.appendChild(el);
@@ -386,6 +396,7 @@ function show(prompt, onAnswer) {
   }
   $('overlay').hidden = false;
   $('menu').hidden = true;
+  fitTitle();
   if (prompt.timeout) { // start full (now it's visible), then drain
     void fill.offsetWidth;
     fill.style.transition = 'width ' + prompt.timeout + 'ms linear';
@@ -445,7 +456,6 @@ function attachSwipe(el, canStart, onSwipe, area, canGo) {
   area.addEventListener('pointercancel', end);
 }
 // Every card swipes, anywhere on the screen: left = leave me alone, right = done / yes, up = deal another.
-const swipeChoice = (p, dir) => (p.swipe ? p.swipe[dir] : (dir === 'up' ? (p.up ? 'up' : null) : dir));
 attachSwipe($('card'), () => !!(shown && (shown.prompt.left || shown.prompt.swipe)),
   (dir) => shown && choose(swipeChoice(shown.prompt, dir)), $('overlay'),
   (dir) => !!(shown && swipeChoice(shown.prompt, dir)));
