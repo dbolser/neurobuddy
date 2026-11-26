@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, splitSteps, startSwitch, dealDeck, narrow, LATER, DAY } from '../app/flow.js';
+import { hurdles, orderCards, startSession, promptFor, answer, deadlineFor, missesDeadline, isHome, splitSteps, startSwitch, dealDeck, narrow, LATER, DAY } from '../app/flow.js';
 
 const now = new Date('2026-11-19T10:00:00');
 const L = { today: 'T', week: 'W', later: 'L', done: 'D' };
@@ -76,10 +76,44 @@ test('swiping right never puts anything off', () => {
 });
 
 test('deadline choices', () => {
-  assert.equal(deadlineFor('tomorrow', now).getDate(), 20);
-  assert.equal(deadlineFor('tomorrow', new Date('2026-11-20T10:00:00')).getDate(), 23, 'Friday -> Monday');
-  assert.equal(deadlineFor('friday', new Date('2026-11-20T10:00:00')).getDate(), 27);
-  assert.equal(deadlineFor('none', now), null);
+  const work = { id: 'w', labels: [] };
+  const home = { id: 'h', labels: [{ name: 'Personal' }] };
+  const fri = new Date('2026-11-20T10:00:00');
+  assert.equal(deadlineFor('soon', now, work).getDate(), 20);
+  assert.equal(deadlineFor('soon', fri, work).getDate(), 23, 'Friday -> Monday');
+  assert.equal(deadlineFor('friday', fri, work).getDate(), 27);
+  assert.equal(deadlineFor('later', now, work).getDate(), 26, 'next week');
+  assert.equal(deadlineFor('soon', now, home).getDate(), 21, 'home: Thursday -> Saturday');
+  assert.equal(deadlineFor('soon', new Date('2026-11-21T10:00:00'), home).getDate(), 22, 'home: Saturday -> Sunday');
+  assert.equal(deadlineFor('later', now, home).getDate(), 28, 'home: next weekend');
+  assert.equal(deadlineFor('soon', now, home).getHours(), 17);
+  assert.equal(deadlineFor('none', now, work), null);
+});
+
+test('deadline card: right = soonest day, left = a week later; home cards get the weekend', () => {
+  const thu = new Date('2026-11-26T11:15:00');
+  const work = { id: 'w', name: 'Report', due: null, checklists: [], labels: [] };
+  const home = { id: 'h', name: 'Tax thingy?', due: null, checklists: [], labels: [{ name: 'Personal', color: 'pink' }] };
+  const map = { w: work, h: home };
+  const at = (id) => ({ order: [id], ci: 0, hi: 0, step: 'setdue', skips: {} });
+  const pw = promptFor(at('w'), map, thu);
+  assert.deepEqual(pw.swipe, { left: 'later', right: 'soon' });
+  assert.deepEqual(pw.buttons.map((b) => b.label), ['Tomorrow', 'Next week', 'No deadline'], 'no Friday when tomorrow is Friday');
+  const ph = promptFor(at('h'), map, thu);
+  assert.deepEqual(ph.buttons.map((b) => b.label), ['Saturday', 'Next weekend', 'No deadline']);
+  assert.equal(new Date(answer(at('h'), map, 'soon', thu).effects[0].due).getDay(), 6);
+  assert.ok(isHome({ labels: [{ name: 'home' }] }) && !isHome({ labels: [{ name: 'Ops' }] }) && !isHome({}));
+});
+
+test('putting off a home card skips to the weekend', () => {
+  const thu = new Date('2026-11-26T11:15:00');
+  const home = { id: 'h', name: 'Tax thingy?', due: null, checklists: [], labels: [{ name: 'Personal' }] };
+  const p = promptFor({ order: ['h'], ci: 0, hi: 0, step: 'delay', skips: {} }, { h: home }, thu);
+  assert.equal(p.buttons[2].label, 'Saturday');
+  const r = answer({ order: ['h'], ci: 0, hi: 0, step: 'delay', skips: {} }, { h: home }, 'tomorrow', thu);
+  assert.equal(new Date(r.effects[0].until).getDay(), 6);
+  assert.equal(r.effects[1].text, 'Put off until Saturday');
+  assert.equal(r.next.step, 'setdue');
 });
 
 test('not now on a card due later today offers later today, and only warns when tomorrow would miss it', () => {

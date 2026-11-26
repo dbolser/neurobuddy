@@ -96,7 +96,7 @@ function refresh() {
   return flush().then(() => Promise.all([
     trello('GET', '/boards/' + cfg.board + '/lists', { fields: 'name' }),
     trello('GET', '/boards/' + cfg.board + '/cards', {
-      fields: 'name,idList,due,dueComplete,pos', checklists: 'all',
+      fields: 'name,idList,due,dueComplete,pos,labels', checklists: 'all',
       checklist_fields: 'name,pos', checkItem_fields: 'name,state,pos' }),
   ])).then((r) => {
     const byName = {};

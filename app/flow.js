@@ -61,25 +61,38 @@ export function startOfDay(d) {
   return x;
 }
 
-// Next weekday (Friday -> Monday).
-export function nextWorkday(now) {
+// Cards labelled Personal (or Home) are done at home: put off to the weekend, not the next workday.
+export function isHome(card) {
+  return !!card && (card.labels || []).some((l) => /^(personal|home)$/i.test((l.name || '').trim()));
+}
+
+const isWeekend = (wd) => wd === 0 || wd === 6;
+function nextDay(now, ok) {
   const d = startOfDay(now);
-  do d.setDate(d.getDate() + 1); while (d.getDay() === 0 || d.getDay() === 6);
+  do d.setDate(d.getDate() + 1); while (!ok(d.getDay()));
   return d;
 }
 
-export function nextWorkdayName(now) {
-  const d = nextWorkday(now);
+// Next weekday (Friday -> Monday).
+export const nextWorkday = (now) => nextDay(now, (wd) => !isWeekend(wd));
+// Next weekend day (weekday -> Saturday, Saturday -> Sunday).
+export const nextHomeday = (now) => nextDay(now, isWeekend);
+// The next day this card can be done: home cards at the weekend, the rest on a workday.
+export const nextDayFor = (card, now) => (isHome(card) ? nextHomeday : nextWorkday)(now);
+
+export function dayName(d, now) {
   return +d === +startOfDay(+startOfDay(now) + DAY + 3e6) ? 'Tomorrow' : d.toLocaleDateString('en-GB', { weekday: 'long' });
 }
 
-// Deadline choices offered when a card without one gets put off. 17:00 local.
-export function deadlineFor(choice, now) {
-  const d = startOfDay(now);
-  if (choice === 'tomorrow') d.setTime(+nextWorkday(now));
-  else if (choice === 'friday') d.setDate(d.getDate() + (((5 - d.getDay() + 7) % 7) || 7));
-  else if (choice === 'nextweek') d.setDate(d.getDate() + 7);
+// Deadline choices offered when a card gets put off. 17:00 local.
+// 'soon' = the next day it can be done; 'later' = a week after that ("Next week" / "Next weekend").
+export function deadlineFor(choice, now, card) {
+  let d;
+  if (choice === 'soon') d = nextDayFor(card, now);
+  else if (choice === 'friday') d = nextDay(now, (wd) => wd === 5);
+  else if (choice === 'later') d = isHome(card) ? new Date(+nextHomeday(now) + 7 * DAY + 3e6) : new Date(+startOfDay(now) + 7 * DAY + 3e6);
   else return null;
+  d = startOfDay(d);
   d.setHours(17);
   return d;
 }
@@ -160,9 +173,9 @@ function with_(s, patch) {
   return Object.assign({}, s, patch);
 }
 
-// Putting it off until tomorrow would miss the deadline (due before tomorrow noon).
+// Putting it off to the next day it can be done would miss the deadline (due before noon that day).
 export function missesDeadline(card, now) {
-  return !!card.due && !card.dueComplete && new Date(card.due) < +startOfDay(now) + 1.5 * DAY;
+  return !!card.due && !card.dueComplete && new Date(card.due) < +nextDayFor(card, now) + DAY / 2;
 }
 
 // First step that wasn't sorted to Later (the last step is never offered for sorting).
@@ -177,15 +190,17 @@ function leftDelay(s, card, now) {
   return missesDeadline(card, now) ? 'move' : 'tomorrow';
 }
 
-// Put the card off: 'later' (90 min), 'tomorrow' (next workday) or 'move' (new deadline).
+// Put the card off: 'later' (90 min), 'tomorrow' (the next day it can be done: next workday,
+// or the weekend for home cards) or 'move' (new deadline).
 function putOff(s, card, how, now, fx) {
   if (how === 'later') {
     fx.push({ type: 'snooze', cardId: card.id, until: +now + 90 * 60e3 });
     fx.push({ type: 'comment', cardId: card.id, text: 'Put off until later today' });
     return { next: nextCard(s), effects: fx };
   }
-  fx.push({ type: 'snooze', cardId: card.id, until: +startOfDay(+now + DAY) });
-  if (how === 'tomorrow') fx.push({ type: 'comment', cardId: card.id, text: 'Put off until ' + nextWorkdayName(now) });
+  const day = nextDayFor(card, now);
+  fx.push({ type: 'snooze', cardId: card.id, until: +day });
+  if (how === 'tomorrow') fx.push({ type: 'comment', cardId: card.id, text: 'Put off until ' + dayName(day, now) });
   // Moving the deadline (or a card without one) asks for the new date.
   return { next: card.due && how === 'tomorrow' ? nextCard(s) : with_(s, { step: 'setdue' }), effects: fx };
 }
@@ -217,7 +232,7 @@ export function promptFor(s, byId, now) {
   // new deadline). The arrows show where a swipe goes.
   if (s.step === 'delay') {
     const miss = missesDeadline(card, now);
-    const far = miss ? { id: 'move', label: 'New deadline' } : { id: 'tomorrow', label: nextWorkdayName(now) };
+    const far = miss ? { id: 'move', label: 'New deadline' } : { id: 'tomorrow', label: dayName(nextDayFor(card, now), now) };
     const near = { id: 'later', label: 'Later today' };
     const left = leftDelay(s, card, now);
     [near, far].forEach((b) => { if (b.id === left) b.label = '← ' + b.label; });
@@ -239,11 +254,15 @@ export function promptFor(s, byId, now) {
       left: 'Not now', right: 'Do it' };
   }
   if (s.step === 'setdue') {
+    // Right = the soonest day it can be done, left = a week later. Friday only when it's a different day.
+    const soon = nextDayFor(card, now);
+    const home = isHome(card);
+    const buttons = [{ id: 'soon', label: dayName(soon, now) }];
+    if (!home && soon.getDay() !== 5) buttons.push({ id: 'friday', label: 'Friday' });
+    buttons.push({ id: 'later', label: home ? 'Next weekend' : 'Next week' }, { id: 'none', label: 'No deadline' });
     return { q: card.due ? 'New deadline?' : 'Give it a deadline?', title: card.name,
-      sub: card.due ? 'Was ' + dueText(card, now) : '',
-      buttons: [{ id: 'tomorrow', label: nextWorkdayName(now) }, { id: 'friday', label: 'Friday' },
-        { id: 'nextweek', label: 'Next week' }, { id: 'none', label: 'No deadline' }],
-      swipe: { left: 'tomorrow', right: 'tomorrow' } };
+      sub: card.due ? 'Was ' + dueText(card, now) : '', buttons: buttons,
+      swipe: { left: 'later', right: 'soon' } };
   }
   if (s.step === 'breakdown') {
     return { q: 'Break it down?', title: card.name, sub: "What's the smallest next step?",
@@ -328,7 +347,7 @@ export function answer(s, byId, choice, now) {
   }
 
   if (s.step === 'setdue') {
-    const due = deadlineFor(choice, now);
+    const due = deadlineFor(choice, now, card);
     if (due) fx.push({ type: 'setDue', cardId: card.id, due: due.toISOString() });
     if (card.due) fx.push({ type: 'comment', cardId: card.id,
       text: 'Moved the deadline from ' + dueText(card, now) + ' to ' + (due ? dueText({ due: due }, now) : 'none') });
