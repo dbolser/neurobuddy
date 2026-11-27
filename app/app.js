@@ -8,7 +8,7 @@ const API = 'https://api.trello.com/1';
 const MIN = 60e3;
 const BUSY = 45; // minutes of quiet after "I'm busy" (on top of the usual offer gap)
 const DEFAULTS = { checkin: 20, offer: 15, start: 9, end: 18, poll: 2, face: 'bar+words' }; // minutes / hours
-const CHECKIN_SHOWN = 5; // minutes a card the app put up by itself stays, if ignored
+const PROMPT_LIFETIME = 5 * MIN;
 const $ = (id) => document.getElementById(id);
 
 // ---------- storage (survives private-mode failures) ----------
@@ -339,7 +339,7 @@ function renderFace(now) {
 }
 
 // ---------- card overlay ----------
-let shown = null; // { prompt, onAnswer }
+let shown = null; // { prompt, onAnswer, expiresAt }
 // Which button a swipe picks: from prompt.swipe, or the plain left / right buttons.
 const swipeChoice = (p, dir) => (p.swipe ? p.swipe[dir] : (dir === 'up' ? (p.up ? 'up' : null) : dir));
 
@@ -353,18 +353,14 @@ function fitTitle() {
 window.addEventListener('resize', () => { if (shown) fitTitle(); });
 let expiry = null;
 
-// prompt.timeout (ms): unanswered by then, the card goes away and onTimeout runs.
 function show(prompt, onAnswer) {
-  shown = { prompt: prompt, onAnswer: onAnswer };
+  const mine = shown = { prompt: prompt, onAnswer: onAnswer, expiresAt: Date.now() + PROMPT_LIFETIME };
   clearTimeout(expiry);
+  expiry = setTimeout(expirePrompt, PROMPT_LIFETIME);
   const fill = $('expiryFill');
-  $('expiry').hidden = !prompt.timeout;
+  $('expiry').hidden = false;
   fill.style.transition = 'none';
   fill.style.width = '100%';
-  if (prompt.timeout) {
-    const mine = shown;
-    expiry = setTimeout(() => { if (shown === mine) { hide(); prompt.onTimeout && prompt.onTimeout(); } }, prompt.timeout);
-  }
   const card = $('card');
   card.className = (prompt.danger ? 'danger' : prompt.urgent ? 'urgent' : '');
   card.style.transform = '';
@@ -384,32 +380,46 @@ function show(prompt, onAnswer) {
     el.textContent = /[←→]/.test(b.label) ? b.label
       : (swipeChoice(prompt, 'left') === b.id ? '← ' : '') + b.label + (swipeChoice(prompt, 'right') === b.id ? ' →' : '');
     if (b.cls) el.className = b.cls;
-    el.onclick = () => choose(b.id);
+    el.onclick = () => { if (shown === mine) choose(b.id); };
     box.appendChild(el);
   });
   if (prompt.busy) {
     const el = document.createElement('button');
     el.textContent = "I'm busy with something else · ask me in an hour";
     el.className = 'quiet';
-    el.onclick = () => choose('busy');
+    el.onclick = () => { if (shown === mine) choose('busy'); };
     box.appendChild(el);
   }
   $('overlay').hidden = false;
   $('menu').hidden = true;
   fitTitle();
-  if (prompt.timeout) { // start full (now it's visible), then drain
-    void fill.offsetWidth;
-    fill.style.transition = 'width ' + prompt.timeout + 'ms linear';
-    fill.style.width = '0%';
-  }
-  if (prompt.input) setTimeout(() => $('stepInput').focus(), 50);
+  void fill.offsetWidth; // start full (now it's visible), then drain
+  fill.style.transition = 'width ' + PROMPT_LIFETIME + 'ms linear';
+  fill.style.width = '0%';
+  if (prompt.input) setTimeout(() => { if (shown === mine) $('stepInput').focus(); }, 50);
   else alertUser();
 }
 
 function hide() { shown = null; clearTimeout(expiry); $('overlay').hidden = true; }
 
+function expirePrompt() {
+  const now = Date.now();
+  if (!shown || now < shown.expiresAt) return false;
+  const { prompt } = shown;
+  hide();
+  st.session = null;
+  deck = null;
+  // Give the clock a full reminder interval before offering anything again.
+  if (st.current) st.lastCheck = Math.max(st.lastCheck, now);
+  else st.lastOffer = Math.max(st.lastOffer, now);
+  if (prompt.onTimeout) prompt.onTimeout();
+  persist();
+  renderClock();
+  return true;
+}
+
 function choose(id) {
-  if (!shown) return;
+  if (!shown || expirePrompt()) return;
   const s = shown;
   hide();
   s.onAnswer(id);
@@ -422,9 +432,13 @@ let swiped = 0; // time of the last swipe, so its pointerup doesn't also count a
 function attachSwipe(el, canStart, onSwipe, area, canGo) {
   area = area || el;
   let x0 = null, y0 = 0, dx = 0, dy = 0;
+  let target = null;
   const vert = () => Math.abs(dy) > Math.abs(dx) && canGo && canGo(dy < 0 ? 'up' : 'down');
   area.addEventListener('pointerdown', (e) => {
-    if (!canStart() || e.target.tagName === 'INPUT') return;
+    if (e.target.tagName === 'INPUT') return;
+    const start = canStart();
+    if (!start) return;
+    target = start;
     x0 = e.clientX; y0 = e.clientY; dx = dy = 0; el.classList.remove('snap');
   });
   area.addEventListener('pointermove', (e) => {
@@ -445,8 +459,12 @@ function attachSwipe(el, canStart, onSwipe, area, canGo) {
     el.classList.remove('lean-right', 'lean-left', 'lean-up');
     if (Math.max(Math.abs(dx), Math.abs(dy)) > 10) swiped = Date.now();
     const go = (dir, transform) => {
+      const start = target;
       el.style.transform = transform;
-      setTimeout(() => { onSwipe(dir); el.style.transform = ''; }, 180);
+      setTimeout(() => {
+        if (canStart() === start) onSwipe(dir);
+        el.style.transform = '';
+      }, 180);
     };
     if (vert() && Math.abs(dy) > window.innerHeight / 6) go(dy < 0 ? 'up' : 'down', 'translateY(' + (dy < 0 ? -1 : 1) * window.innerHeight + 'px)');
     else if (!vert() && Math.abs(dx) > window.innerWidth / 4) go(dx > 0 ? 'right' : 'left', 'translateX(' + (dx > 0 ? 1 : -1) * window.innerWidth + 'px)');
@@ -456,7 +474,7 @@ function attachSwipe(el, canStart, onSwipe, area, canGo) {
   area.addEventListener('pointercancel', end);
 }
 // Every card swipes, anywhere on the screen: left = leave me alone, right = done / yes, up = deal another.
-attachSwipe($('card'), () => !!(shown && (shown.prompt.left || shown.prompt.swipe)),
+attachSwipe($('card'), () => shown && (shown.prompt.left || shown.prompt.swipe) && shown,
   (dir) => shown && choose(swipeChoice(shown.prompt, dir)), $('overlay'),
   (dir) => !!(shown && swipeChoice(shown.prompt, dir)));
 
@@ -525,7 +543,7 @@ function swapStack() {
 }
 
 // ---------- sessions & check-ins ----------
-// auto: offered by the app itself (not asked for), so its cards go away if ignored.
+// Automatic offers also close when work hours end.
 function pickTask(firstId, step, auto) {
   const now = new Date();
   st.lastOffer = Date.now();
@@ -546,10 +564,8 @@ function nextPrompt() {
     : s.step === 'breakdown' ? 'Breaking it down'
     : /sort|ugly|ship/.test(s.step) ? 'Send it ugly' : 'Choosing a task';
   prompt.busy = s.step !== 'empty' && !s.quick;
-  if (s.auto) { // nobody asked: back to the clock if it's ignored
-    prompt.timeout = CHECKIN_SHOWN * MIN;
-    prompt.onTimeout = () => { st.session = null; log({ kind: 'session', step: s.step, choice: 'ignored' }); };
-  }
+  prompt.auto = s.auto;
+  prompt.onTimeout = () => log({ kind: 'session', step: s.step, cardId: s.order[s.ci], choice: 'ignored' });
   show(prompt, (choice) => {
     log({ kind: 'session', step: s.step, cardId: s.order[s.ci], choice: choice });
     if (choice === 'up') { st.session = null; persist(); return deal(true); }
@@ -568,15 +584,26 @@ function nextPrompt() {
 
 // Type steps one at a time: "Go" on the keyboard adds each; Save writes them all.
 let typed = null; // steps typed so far on the open card
+const stepDrafts = new Map();
 function askSteps(cardId, cardName, startFirst) {
-  typed = [];
+  const input = $('stepInput');
+  const draft = stepDrafts.get(cardId);
+  typed = draft ? draft.steps : [];
+  input.value = draft ? draft.input : '';
   const prompt = { mode: startFirst ? 'Breaking it down' : 'Adding steps', title: cardName, input: true,
     q: startFirst ? 'Smallest next step? Then any more.' : 'Brain dump: one step at a time, "Go" after each.',
+    sub: typed.map((x, i) => (i + 1) + '. ' + x).join('   '),
     buttons: [{ id: 'cancel', label: 'Never mind' }, { id: 'save', label: startFirst ? 'Save and start the first' : 'Save steps', cls: 'yes' }],
-    swipe: { left: 'cancel', right: 'save' } };
+    swipe: { left: 'cancel', right: 'save' },
+    onTimeout: () => {
+      if (typed.length || input.value.trim()) stepDrafts.set(cardId, { steps: typed, input: input.value });
+      input.value = '';
+      typed = null;
+    } };
   show(prompt, (choice) => {
-    const last = $('stepInput').value.trim();
-    $('stepInput').value = '';
+    const last = input.value.trim();
+    input.value = '';
+    stepDrafts.delete(cardId);
     if (last) typed.push(last);
     const texts = [].concat.apply([], typed.map(splitSteps));
     typed = null;
@@ -588,7 +615,7 @@ function askSteps(cardId, cardName, startFirst) {
 $('stepForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const t = $('stepInput').value.trim();
-  if (!t || !typed) return;
+  if (expirePrompt() || !t || !typed) return;
   typed.push(t);
   $('stepInput').value = '';
   typed = [].concat.apply([], typed.map(splitSteps));
@@ -614,10 +641,11 @@ function checkin(byTap) {
       buttons: [{ id: 'still', label: 'Still on it', cls: 'yes' }, { id: 'done', label: 'Done ✓' },
         { id: 'steps', label: 'Add steps' }, { id: 'switch', label: 'Switching' }, { id: 'stuck', label: 'Stuck' }],
       swipe: { left: 'still', right: 'done', up: 'up' } };
-  if (!byTap) {
-    prompt.timeout = CHECKIN_SHOWN * MIN;
-    prompt.onTimeout = () => { st.missed = true; persist(); log({ kind: 'checkin', cardId: c.cardId, choice: 'missed', mins: mins }); };
-  }
+  prompt.auto = !byTap;
+  if (prompt.auto) prompt.onTimeout = () => {
+    st.missed = true;
+    log({ kind: 'checkin', cardId: c.cardId, choice: 'missed', mins: mins });
+  };
   show(prompt, (choice) => {
     log({ kind: 'checkin', cardId: c.cardId, itemId: c.itemId, choice: choice, mins: mins });
     st.missed = false;
@@ -667,15 +695,19 @@ function renderHome(now) {
   }
   $('homeBtn').textContent = 'Home time: ' + (t ? homeWords(t) : 'none today') + '  (tap to change)';
 }
-// The one card that waits for an answer: it's a promise to someone.
 function homeCard() {
+  const home = st.home;
   const said = homeTime(new Date());
-  said.setHours(0, st.home.said || st.home.at, 0, 0);
+  said.setHours(0, home.said || home.at, 0, 0);
   show({ mode: 'Home time', q: 'You said you\'d leave at ' + homeWords(said) + '.', title: 'Time to go home 🏠',
     sub: st.current ? 'Your task will be here tomorrow: ' + st.current.name : '',
     buttons: [{ id: 'go', label: 'Leaving now', cls: 'yes' }, { id: 'stay', label: 'No, keep working' }]
       .concat(st.home.extended ? [] : [{ id: 'more', label: '10 more minutes' }]),
-    swipe: { left: 'stay', right: 'go' } },
+    swipe: { left: 'stay', right: 'go' },
+    onTimeout: () => {
+      if (st.home && st.home.day === home.day && st.home.at === home.at) st.home.done = true;
+      log({ kind: 'home', choice: 'ignored' });
+    } },
   (choice) => {
     log({ kind: 'home', choice: choice });
     if (choice === 'more') { st.home.said = st.home.at; st.home.at += 10; st.home.extended = true; } else st.home.done = true;
@@ -687,10 +719,11 @@ function homeCard() {
 }
 
 function tick() {
+  if (expirePrompt()) return;
   renderClock();
   const now = new Date();
   // Work's over: cards the app put up by itself go away.
-  if (!workHours(now) && shown && shown.prompt.timeout) { hide(); st.session = null; }
+  if (!workHours(now) && shown && shown.prompt.auto) { hide(); st.session = null; }
   const home = homeTime(now);
   if (home && now >= home && !st.home.done && !shown && $('menu').hidden) return homeCard();
   if (shown || !$('menu').hidden || !cfg.token) return;
@@ -724,7 +757,10 @@ function keepAwake() {
   if (lock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
   navigator.wakeLock.request('screen').then((l) => { lock = l; l.addEventListener('release', () => { lock = null; }); }, () => {});
 }
-document.addEventListener('visibilitychange', () => { keepAwake(); if (document.visibilityState === 'visible') refresh(); });
+document.addEventListener('visibilitychange', () => {
+  keepAwake();
+  if (document.visibilityState === 'visible') { expirePrompt(); refresh(); }
+});
 window.addEventListener('online', refresh); // wifi back: send what waited
 
 // ---------- the task strip: swipe right = done, left = something else, tap = check in ----------
